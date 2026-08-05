@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Environments
+.venv/
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# Generated documents and local storage
+storage/
+output/
+*.pdf
+*.docx
+
+# Operating systems
+.DS_Store
+Thumbs.db
