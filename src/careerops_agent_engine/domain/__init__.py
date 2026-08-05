@@ -1,0 +1,1 @@
+"""CareerOps business-domain definitions."""
