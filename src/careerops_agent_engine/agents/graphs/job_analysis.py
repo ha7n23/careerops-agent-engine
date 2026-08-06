@@ -1,4 +1,4 @@
-"""Construction of the job-analysis graph."""
+"""Construction of the CareerOps job-analysis graph."""
 
 from typing import Literal
 
@@ -9,12 +9,16 @@ from langgraph.graph.state import CompiledStateGraph
 from careerops_agent_engine.agents.nodes.job_analysis import (
     calculate_fit,
     complete_analysis,
+    create_discover_evidence_node,
     create_extract_requirements_node,
     mark_invalid,
     validate_job_input,
 )
 from careerops_agent_engine.agents.states.job_analysis import (
     JobAnalysisState,
+)
+from careerops_agent_engine.application.ports.evidence_discovery import (
+    EvidenceDiscoveryRunner,
 )
 from careerops_agent_engine.application.ports.requirement_extractor import (
     RequirementExtractor,
@@ -34,6 +38,7 @@ def route_after_validation(
 
 def build_job_analysis_graph(
     requirement_extractor: RequirementExtractor,
+    evidence_discovery_runner: EvidenceDiscoveryRunner,
 ) -> CompiledStateGraph[
     JobAnalysisState,
     None,
@@ -47,11 +52,18 @@ def build_job_analysis_graph(
     extract_requirements_node = RunnableLambda(
         create_extract_requirements_node(requirement_extractor)
     )
+    discover_evidence_node = RunnableLambda(
+        create_discover_evidence_node(evidence_discovery_runner)
+    )
 
     builder.add_node("validate_job_input", validate_job_input)
     builder.add_node(
         "extract_requirements",
         extract_requirements_node,
+    )
+    builder.add_node(
+        "discover_evidence",
+        discover_evidence_node,
     )
     builder.add_node("calculate_fit", calculate_fit)
     builder.add_node("complete_analysis", complete_analysis)
@@ -68,7 +80,8 @@ def build_job_analysis_graph(
         },
     )
 
-    builder.add_edge("extract_requirements", "calculate_fit")
+    builder.add_edge("extract_requirements", "discover_evidence")
+    builder.add_edge("discover_evidence", "calculate_fit")
     builder.add_edge("calculate_fit", "complete_analysis")
     builder.add_edge("complete_analysis", END)
     builder.add_edge("mark_invalid", END)

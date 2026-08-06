@@ -5,6 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from careerops_agent_engine.api.dependencies import (
+    get_authenticated_user_id,
     get_job_analysis_service,
 )
 from careerops_agent_engine.api.schemas.job_analysis import (
@@ -15,6 +16,7 @@ from careerops_agent_engine.api.schemas.job_analysis import (
 from careerops_agent_engine.application.services.job_analysis import (
     JobAnalysisService,
 )
+from careerops_agent_engine.domain.models.evidence import EvidenceMatch
 from careerops_agent_engine.domain.models.job import JobRequirement
 
 router = APIRouter(
@@ -27,6 +29,11 @@ JobAnalysisServiceDependency = Annotated[
     Depends(get_job_analysis_service),
 ]
 
+AuthenticatedUserIdDependency = Annotated[
+    str,
+    Depends(get_authenticated_user_id),
+]
+
 
 @router.post(
     "",
@@ -37,14 +44,15 @@ JobAnalysisServiceDependency = Annotated[
 def analyse_job(
     request: JobAnalysisRequest,
     service: JobAnalysisServiceDependency,
+    user_id: AuthenticatedUserIdDependency,
 ) -> JobAnalysisResponse:
-    """Extract job requirements and calculate the current fit score."""
+    """Extract requirements, discover evidence and calculate fit."""
 
     try:
         result = service.analyse(
             job_id=request.job_id,
+            user_id=user_id,
             job_description=request.job_description,
-            matched_requirement_ids=request.matched_requirement_ids,
         )
     except ValueError as exc:
         raise HTTPException(
@@ -65,12 +73,17 @@ def analyse_job(
     if fit_score is None:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="The workflow completed without calculating a fit score.",
+            detail=("The workflow completed without calculating a fit score."),
         )
 
     requirements = [
         JobRequirement.model_validate(requirement)
         for requirement in result.get("requirements", [])
+    ]
+
+    evidence_matches = [
+        EvidenceMatch.model_validate(match)
+        for match in result.get("evidence_matches", [])
     ]
 
     audit_events = [
@@ -83,6 +96,7 @@ def analyse_job(
         job_id=result["job_id"],
         role_title=result.get("role_title"),
         requirements=requirements,
+        evidence_matches=evidence_matches,
         fit_score=fit_score,
         audit_events=audit_events,
     )

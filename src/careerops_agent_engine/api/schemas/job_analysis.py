@@ -1,9 +1,10 @@
 """API contracts for job-analysis operations."""
 
-from typing import Literal, Self
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 
+from careerops_agent_engine.domain.models.evidence import EvidenceMatch
 from careerops_agent_engine.domain.models.job import JobRequirement
 
 
@@ -16,25 +17,10 @@ class JobAnalysisRequest(BaseModel):
     )
 
     job_id: str = Field(min_length=1, max_length=64)
-    job_description: str = Field(min_length=1, max_length=50_000)
-
-    matched_requirement_ids: list[str] = Field(
-        default_factory=list,
-        max_length=100,
-        description=(
-            "Temporary development input representing requirements "
-            "already supported by direct evidence."
-        ),
+    job_description: str = Field(
+        min_length=1,
+        max_length=50_000,
     )
-
-    @model_validator(mode="after")
-    def validate_unique_match_ids(self) -> Self:
-        """Reject duplicated requirement references."""
-
-        if len(self.matched_requirement_ids) != len(set(self.matched_requirement_ids)):
-            raise ValueError("Matched requirement identifiers must be unique.")
-
-        return self
 
 
 class AuditEventResponse(BaseModel):
@@ -45,13 +31,14 @@ class AuditEventResponse(BaseModel):
 
 
 class JobAnalysisResponse(BaseModel):
-    """Successful result of a job-analysis workflow."""
+    """Successful result of an evidence-grounded job analysis."""
 
     status: Literal["completed"]
     job_id: str
     role_title: str | None
 
     requirements: list[JobRequirement]
+    evidence_matches: list[EvidenceMatch]
     fit_score: float = Field(ge=0.0, le=100.0)
 
     audit_events: list[AuditEventResponse]

@@ -8,6 +8,9 @@ from careerops_agent_engine.agents.graphs.job_analysis import (
 from careerops_agent_engine.agents.states.job_analysis import (
     JobAnalysisState,
 )
+from careerops_agent_engine.application.ports.evidence_discovery import (
+    EvidenceDiscoveryRunner,
+)
 from careerops_agent_engine.application.ports.requirement_extractor import (
     RequirementExtractor,
 )
@@ -18,27 +21,30 @@ class JobAnalysisService:
 
     def __init__(
         self,
+        *,
         requirement_extractor: RequirementExtractor,
+        evidence_discovery_runner: EvidenceDiscoveryRunner,
     ) -> None:
-        """Build the graph with its required external adapter."""
+        """Build the graph with its required external adapters."""
 
         self._graph = build_job_analysis_graph(
-            requirement_extractor=requirement_extractor
+            requirement_extractor=requirement_extractor,
+            evidence_discovery_runner=evidence_discovery_runner,
         )
 
     def analyse(
         self,
         *,
         job_id: str,
+        user_id: str,
         job_description: str,
-        matched_requirement_ids: list[str],
     ) -> JobAnalysisState:
         """Run one complete job-analysis workflow."""
 
         initial_state: JobAnalysisState = {
             "job_id": job_id,
+            "user_id": user_id,
             "job_description": job_description,
-            "matched_requirement_ids": matched_requirement_ids,
             "audit_events": [],
         }
 

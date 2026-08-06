@@ -1,4 +1,4 @@
-"""Nodes for the initial job-analysis graph."""
+"""Nodes for the CareerOps job-analysis graph."""
 
 from collections.abc import Callable
 
@@ -6,12 +6,16 @@ from careerops_agent_engine.agents.states.job_analysis import (
     JobAnalysisState,
     JobAnalysisUpdate,
 )
+from careerops_agent_engine.application.ports.evidence_discovery import (
+    EvidenceDiscoveryRunner,
+)
 from careerops_agent_engine.application.ports.requirement_extractor import (
     RequirementExtractor,
 )
 from careerops_agent_engine.application.services.fit_scoring import (
-    calculate_weighted_fit,
+    calculate_evidence_weighted_fit,
 )
+from careerops_agent_engine.domain.models.evidence import EvidenceMatch
 from careerops_agent_engine.domain.models.job import JobRequirement
 
 MINIMUM_JOB_DESCRIPTION_LENGTH = 20
@@ -83,19 +87,57 @@ def create_extract_requirements_node(
     return extract_requirements
 
 
+def create_discover_evidence_node(
+    evidence_discovery_runner: EvidenceDiscoveryRunner,
+) -> Callable[[JobAnalysisState], JobAnalysisUpdate]:
+    """Create a node that discovers evidence for every requirement."""
+
+    def discover_evidence(
+        state: JobAnalysisState,
+    ) -> JobAnalysisUpdate:
+        requirements = [
+            JobRequirement.model_validate(payload)
+            for payload in state.get("requirements", [])
+        ]
+
+        matches = [
+            evidence_discovery_runner.discover(
+                requirement,
+                user_id=state["user_id"],
+            )
+            for requirement in requirements
+        ]
+
+        return {
+            "evidence_matches": [match.model_dump(mode="json") for match in matches],
+            "audit_events": [
+                {
+                    "node": "discover_evidence",
+                    "event": "evidence_discovery_completed",
+                }
+            ],
+        }
+
+    return discover_evidence
+
+
 def calculate_fit(
     state: JobAnalysisState,
 ) -> JobAnalysisUpdate:
-    """Calculate a deterministic score from extracted requirements."""
+    """Calculate a deterministic score from evidence matches."""
 
-    requirement_payloads = state.get("requirements", [])
     requirements = [
-        JobRequirement.model_validate(payload) for payload in requirement_payloads
+        JobRequirement.model_validate(payload)
+        for payload in state.get("requirements", [])
+    ]
+    evidence_matches = [
+        EvidenceMatch.model_validate(payload)
+        for payload in state.get("evidence_matches", [])
     ]
 
-    fit_score = calculate_weighted_fit(
+    fit_score = calculate_evidence_weighted_fit(
         requirements=requirements,
-        matched_requirement_ids=state["matched_requirement_ids"],
+        evidence_matches=evidence_matches,
     )
 
     return {
@@ -130,7 +172,7 @@ def complete_analysis(
 def mark_invalid(
     state: JobAnalysisState,
 ) -> JobAnalysisUpdate:
-    """Finish an invalid workflow without running analysis nodes."""
+    """Finish invalid input without running later nodes."""
 
     del state
 
