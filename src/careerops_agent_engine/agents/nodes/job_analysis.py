@@ -67,6 +67,7 @@ def create_extract_requirements_node(
         )
 
         return {
+            "role_title": extraction.role_title,
             "requirements": [
                 requirement.model_dump(mode="json")
                 for requirement in extraction.requirements

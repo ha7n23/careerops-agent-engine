@@ -26,6 +26,7 @@ class JobAnalysisState(TypedDict):
 
     audit_events: Annotated[list[AuditEvent], add]
 
+    role_title: NotRequired[str | None]
     requirements: NotRequired[list[dict[str, object]]]
     fit_score: NotRequired[float]
     status: NotRequired[JobAnalysisStatus]
@@ -36,6 +37,7 @@ class JobAnalysisUpdate(TypedDict, total=False):
     """Partial update returned by one graph node."""
 
     job_description: str
+    role_title: str | None
     requirements: list[dict[str, object]]
     fit_score: float
     status: JobAnalysisStatus

@@ -75,6 +75,7 @@ def test_valid_job_runs_complete_analysis_path() -> None:
     assert result["validation_error"] is None
     assert len(result["requirements"]) == 2
     assert result["fit_score"] == 55.56
+    assert result["role_title"] == "Junior AI Engineer"
 
     assert [event["event"] for event in result["audit_events"]] == [
         "job_input_validated",

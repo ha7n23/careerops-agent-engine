@@ -3,6 +3,9 @@
 from fastapi import FastAPI
 
 from careerops_agent_engine.api.routers.health import router as health_router
+from careerops_agent_engine.api.routers.job_analysis import (
+    router as job_analysis_router,
+)
 from careerops_agent_engine.core.config import get_settings
 
 
@@ -21,7 +24,7 @@ def create_app() -> FastAPI:
     )
 
     application.include_router(health_router)
-
+    application.include_router(job_analysis_router)
     return application
 
 
