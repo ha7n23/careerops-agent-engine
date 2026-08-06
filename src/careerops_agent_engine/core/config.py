@@ -46,6 +46,24 @@ class Settings(BaseSettings):
         le=50,
     )
 
+    database_url: str = (
+        "postgresql+psycopg://careerops:careerops_local_dev@127.0.0.1:5432/careerops"
+    )
+    langgraph_database_uri: str = (
+        "postgresql://careerops:careerops_local_dev@127.0.0.1:5432/careerops"
+    )
+
+    database_pool_size: int = Field(
+        default=5,
+        ge=1,
+        le=20,
+    )
+    database_max_overflow: int = Field(
+        default=10,
+        ge=0,
+        le=50,
+    )
+
 
 @lru_cache
 def get_settings() -> Settings:
