@@ -25,6 +25,27 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    evidence_agent_max_model_calls: int = Field(
+        default=6,
+        ge=2,
+        le=12,
+    )
+    evidence_agent_max_tool_calls: int = Field(
+        default=4,
+        ge=1,
+        le=10,
+    )
+    evidence_agent_max_search_calls: int = Field(
+        default=3,
+        ge=1,
+        le=6,
+    )
+    evidence_agent_recursion_limit: int = Field(
+        default=50,
+        ge=20,
+        le=50,
+    )
+
 
 @lru_cache
 def get_settings() -> Settings:
