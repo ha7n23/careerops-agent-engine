@@ -1,14 +1,65 @@
-"""Tests for the initial deterministic LangGraph workflow."""
+"""Tests for the job-analysis LangGraph workflow."""
 
 from careerops_agent_engine.agents.graphs.job_analysis import (
-    job_analysis_graph,
+    build_job_analysis_graph,
+)
+from careerops_agent_engine.domain.enums import RequirementCategory
+from careerops_agent_engine.domain.models.job import (
+    JobRequirement,
+    JobRequirementExtraction,
 )
 
 
-def test_valid_job_runs_complete_analysis_path() -> None:
-    """Valid input should create requirements and calculate fit."""
+class FakeRequirementExtractor:
+    """Deterministic replacement for the external model in graph tests."""
 
-    result = job_analysis_graph.invoke(
+    def extract(
+        self,
+        job_description: str,
+        *,
+        job_id: str,
+    ) -> JobRequirementExtraction:
+        """Return predictable requirements without an API call."""
+
+        del job_description, job_id
+
+        return JobRequirementExtraction(
+            role_title="Junior AI Engineer",
+            requirements=[
+                JobRequirement(
+                    requirement_id="REQ-PYTHON",
+                    name="Python",
+                    category=RequirementCategory.ESSENTIAL,
+                    evidence_expected=(
+                        "Practical Python software-engineering experience."
+                    ),
+                    importance_score=5,
+                    source_text=("Strong Python development experience is required."),
+                ),
+                JobRequirement(
+                    requirement_id="REQ-LANGGRAPH",
+                    name="LangGraph",
+                    category=RequirementCategory.ESSENTIAL,
+                    evidence_expected=("Implementation of stateful agent workflows."),
+                    importance_score=4,
+                    source_text="Experience with LangGraph is required.",
+                ),
+            ],
+        )
+
+
+def build_test_graph():
+    """Create a graph using the deterministic fake extractor."""
+
+    return build_job_analysis_graph(FakeRequirementExtractor())
+
+
+def test_valid_job_runs_complete_analysis_path() -> None:
+    """Valid input should extract requirements and calculate fit."""
+
+    graph = build_test_graph()
+
+    result = graph.invoke(
         {
             "job_id": "JOB-001",
             "job_description": (
@@ -27,16 +78,18 @@ def test_valid_job_runs_complete_analysis_path() -> None:
 
     assert [event["event"] for event in result["audit_events"]] == [
         "job_input_validated",
-        "mock_requirements_created",
+        "requirements_extracted",
         "fit_score_calculated",
         "job_analysis_completed",
     ]
 
 
-def test_invalid_job_skips_analysis_nodes() -> None:
-    """Invalid input should route directly to the rejection node."""
+def test_invalid_job_skips_extraction_and_scoring() -> None:
+    """Invalid input should route directly to rejection."""
 
-    result = job_analysis_graph.invoke(
+    graph = build_test_graph()
+
+    result = graph.invoke(
         {
             "job_id": "JOB-002",
             "job_description": "Too short",
