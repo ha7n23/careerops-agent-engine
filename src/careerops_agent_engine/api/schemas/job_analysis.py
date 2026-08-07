@@ -4,8 +4,18 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from careerops_agent_engine.domain.models.evidence import EvidenceMatch
-from careerops_agent_engine.domain.models.job import JobRequirement
+from careerops_agent_engine.domain.models.cv import (
+    CVChangeProposal,
+)
+from careerops_agent_engine.domain.models.evidence import (
+    EvidenceMatch,
+)
+from careerops_agent_engine.domain.models.job import (
+    JobRequirement,
+)
+from careerops_agent_engine.domain.models.verification import (
+    CVClaimVerificationReport,
+)
 
 
 class JobAnalysisRequest(BaseModel):
@@ -16,7 +26,10 @@ class JobAnalysisRequest(BaseModel):
         str_strip_whitespace=True,
     )
 
-    job_id: str = Field(min_length=1, max_length=64)
+    job_id: str = Field(
+        min_length=1,
+        max_length=64,
+    )
     job_description: str = Field(
         min_length=1,
         max_length=50_000,
@@ -31,14 +44,25 @@ class AuditEventResponse(BaseModel):
 
 
 class JobAnalysisResponse(BaseModel):
-    """Successful result of an evidence-grounded job analysis."""
+    """Evidence-grounded job and CV analysis."""
 
     status: Literal["completed"]
+
     job_id: str
     role_title: str | None
 
     requirements: list[JobRequirement]
     evidence_matches: list[EvidenceMatch]
-    fit_score: float = Field(ge=0.0, le=100.0)
+
+    fit_score: float = Field(
+        ge=0.0,
+        le=100.0,
+    )
+
+    cv_proposals: list[CVChangeProposal]
+    claim_verification_reports: list[CVClaimVerificationReport]
+
+    reviewable_proposal_ids: list[str]
+    blocked_proposal_ids: list[str]
 
     audit_events: list[AuditEventResponse]

@@ -16,8 +16,14 @@ from careerops_agent_engine.api.schemas.job_analysis import (
 from careerops_agent_engine.application.services.job_analysis import (
     JobAnalysisService,
 )
+from careerops_agent_engine.domain.models.cv import (
+    CVChangeProposal,
+)
 from careerops_agent_engine.domain.models.evidence import EvidenceMatch
 from careerops_agent_engine.domain.models.job import JobRequirement
+from careerops_agent_engine.domain.models.verification import (
+    CVClaimVerificationReport,
+)
 
 router = APIRouter(
     prefix="/api/v1/job-analysis",
@@ -46,7 +52,7 @@ def analyse_job(
     service: JobAnalysisServiceDependency,
     user_id: AuthenticatedUserIdDependency,
 ) -> JobAnalysisResponse:
-    """Extract requirements, discover evidence and calculate fit."""
+    """Analyse a job and produce evidence-verified CV proposals."""
 
     try:
         result = service.analyse(
@@ -86,6 +92,19 @@ def analyse_job(
         for match in result.get("evidence_matches", [])
     ]
 
+    cv_proposals = [
+        CVChangeProposal.model_validate(proposal)
+        for proposal in result.get("cv_proposals", [])
+    ]
+
+    claim_verification_reports = [
+        CVClaimVerificationReport.model_validate(report)
+        for report in result.get(
+            "claim_verification_reports",
+            [],
+        )
+    ]
+
     audit_events = [
         AuditEventResponse.model_validate(event)
         for event in result.get("audit_events", [])
@@ -98,5 +117,15 @@ def analyse_job(
         requirements=requirements,
         evidence_matches=evidence_matches,
         fit_score=fit_score,
+        cv_proposals=cv_proposals,
+        claim_verification_reports=(claim_verification_reports),
+        reviewable_proposal_ids=result.get(
+            "reviewable_proposal_ids",
+            [],
+        ),
+        blocked_proposal_ids=result.get(
+            "blocked_proposal_ids",
+            [],
+        ),
         audit_events=audit_events,
     )

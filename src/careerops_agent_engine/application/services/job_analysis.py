@@ -14,6 +14,12 @@ from careerops_agent_engine.application.ports.evidence_discovery import (
 from careerops_agent_engine.application.ports.requirement_extractor import (
     RequirementExtractor,
 )
+from careerops_agent_engine.application.services.cv_claim_verification import (
+    CVClaimVerificationService,
+)
+from careerops_agent_engine.application.services.cv_proposals import (
+    CVProposalGenerationService,
+)
 
 
 class JobAnalysisService:
@@ -24,12 +30,16 @@ class JobAnalysisService:
         *,
         requirement_extractor: RequirementExtractor,
         evidence_discovery_runner: EvidenceDiscoveryRunner,
+        cv_proposal_service: CVProposalGenerationService,
+        cv_claim_verification_service: (CVClaimVerificationService),
     ) -> None:
-        """Build the graph with its required external adapters."""
+        """Build the graph with its required adapters."""
 
         self._graph = build_job_analysis_graph(
             requirement_extractor=requirement_extractor,
             evidence_discovery_runner=evidence_discovery_runner,
+            cv_proposal_service=cv_proposal_service,
+            cv_claim_verification_service=(cv_claim_verification_service),
         )
 
     def analyse(

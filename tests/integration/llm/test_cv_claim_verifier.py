@@ -38,9 +38,7 @@ def test_live_verifier_blocks_invented_metric() -> None:
     engine = create_database_engine(settings)
     session_factory = create_session_factory(engine)
 
-    repository = SqlAlchemyEvidenceRepository(
-        session_factory
-    )
+    repository = SqlAlchemyEvidenceRepository(session_factory)
 
     try:
         proposal = CVChangeProposal(
@@ -52,9 +50,7 @@ def test_live_verifier_blocks_invented_metric() -> None:
                 "production latency by 40 percent."
             ),
             requirement_ids=["REQ-LIVE-001"],
-            supporting_evidence_ids=[
-                "EVD-DEMO-CAREEROPS"
-            ],
+            supporting_evidence_ids=["EVD-DEMO-CAREEROPS"],
             confidence_score=0.9,
             warnings=[],
         )
@@ -77,9 +73,7 @@ def test_live_verifier_blocks_invented_metric() -> None:
         assert report.fully_supported is False
         assert report.unsupported_claims
 
-        combined_unsupported = " ".join(
-            report.unsupported_claims
-        ).casefold()
+        combined_unsupported = " ".join(report.unsupported_claims).casefold()
 
         assert "40" in combined_unsupported
         assert "latency" in combined_unsupported

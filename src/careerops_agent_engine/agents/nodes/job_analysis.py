@@ -12,11 +12,24 @@ from careerops_agent_engine.application.ports.evidence_discovery import (
 from careerops_agent_engine.application.ports.requirement_extractor import (
     RequirementExtractor,
 )
+from careerops_agent_engine.application.services.cv_claim_verification import (
+    CVClaimVerificationService,
+)
+from careerops_agent_engine.application.services.cv_proposals import (
+    CVProposalGenerationService,
+)
 from careerops_agent_engine.application.services.fit_scoring import (
     calculate_evidence_weighted_fit,
 )
-from careerops_agent_engine.domain.models.evidence import EvidenceMatch
-from careerops_agent_engine.domain.models.job import JobRequirement
+from careerops_agent_engine.domain.models.cv import (
+    CVChangeProposal,
+)
+from careerops_agent_engine.domain.models.evidence import (
+    EvidenceMatch,
+)
+from careerops_agent_engine.domain.models.job import (
+    JobRequirement,
+)
 
 MINIMUM_JOB_DESCRIPTION_LENGTH = 20
 
@@ -130,6 +143,7 @@ def calculate_fit(
         JobRequirement.model_validate(payload)
         for payload in state.get("requirements", [])
     ]
+
     evidence_matches = [
         EvidenceMatch.model_validate(payload)
         for payload in state.get("evidence_matches", [])
@@ -149,6 +163,109 @@ def calculate_fit(
             }
         ],
     }
+
+
+def create_generate_cv_proposals_node(
+    proposal_service: CVProposalGenerationService,
+) -> Callable[[JobAnalysisState], JobAnalysisUpdate]:
+    """Generate proposals only for directly supported requirements."""
+
+    def generate_cv_proposals(
+        state: JobAnalysisState,
+    ) -> JobAnalysisUpdate:
+        requirements = [
+            JobRequirement.model_validate(payload)
+            for payload in state.get("requirements", [])
+        ]
+
+        evidence_matches = [
+            EvidenceMatch.model_validate(payload)
+            for payload in state.get("evidence_matches", [])
+        ]
+
+        matches_by_requirement = {
+            match.requirement_id: match for match in evidence_matches
+        }
+
+        proposals: list[CVChangeProposal] = []
+
+        for requirement in requirements:
+            evidence_match = matches_by_requirement.get(requirement.requirement_id)
+
+            if evidence_match is None:
+                raise ValueError(
+                    "Missing evidence match for requirement: "
+                    f"{requirement.requirement_id}"
+                )
+
+            proposal = proposal_service.generate_for_requirement(
+                job_id=state["job_id"],
+                user_id=state["user_id"],
+                requirement=requirement,
+                evidence_match=evidence_match,
+            )
+
+            if proposal is not None:
+                proposals.append(proposal)
+
+        return {
+            "cv_proposals": [
+                proposal.model_dump(mode="json") for proposal in proposals
+            ],
+            "audit_events": [
+                {
+                    "node": "generate_cv_proposals",
+                    "event": "cv_proposals_generated",
+                }
+            ],
+        }
+
+    return generate_cv_proposals
+
+
+def create_verify_cv_proposals_node(
+    verification_service: CVClaimVerificationService,
+) -> Callable[[JobAnalysisState], JobAnalysisUpdate]:
+    """Verify generated wording before human review is allowed."""
+
+    def verify_cv_proposals(
+        state: JobAnalysisState,
+    ) -> JobAnalysisUpdate:
+        proposals = [
+            CVChangeProposal.model_validate(payload)
+            for payload in state.get("cv_proposals", [])
+        ]
+
+        reports: list[dict[str, object]] = []
+        reviewable_proposal_ids: list[str] = []
+        blocked_proposal_ids: list[str] = []
+
+        for proposal in proposals:
+            report = verification_service.verify_proposal(
+                user_id=state["user_id"],
+                proposal=proposal,
+            )
+
+            reports.append(report.model_dump(mode="json"))
+
+            if report.fully_supported:
+                reviewable_proposal_ids.append(proposal.proposal_id)
+            else:
+                blocked_proposal_ids.append(proposal.proposal_id)
+
+        return {
+            "claim_verification_reports": reports,
+            "reviewable_proposal_ids": (reviewable_proposal_ids),
+            "blocked_proposal_ids": blocked_proposal_ids,
+            "audit_events": [
+                {
+                    "node": "verify_cv_proposals",
+                    "event": "cv_proposals_verified",
+                }
+            ],
+        }
+
+    return verify_cv_proposals
 
 
 def complete_analysis(

@@ -10,6 +10,12 @@ from sqlalchemy.orm import Session, sessionmaker
 from careerops_agent_engine.application.ports.evidence_repository import (
     EvidenceRepository,
 )
+from careerops_agent_engine.application.services.cv_claim_verification import (
+    CVClaimVerificationService,
+)
+from careerops_agent_engine.application.services.cv_proposals import (
+    CVProposalGenerationService,
+)
 from careerops_agent_engine.application.services.job_analysis import (
     JobAnalysisService,
 )
@@ -18,6 +24,8 @@ from careerops_agent_engine.infrastructure.database.session import (
     create_session_factory,
 )
 from careerops_agent_engine.infrastructure.llm.factory import (
+    create_cv_claim_verifier,
+    create_cv_proposal_generator,
     create_evidence_discovery_runner,
     create_requirement_extractor,
 )
@@ -70,7 +78,19 @@ def get_job_analysis_service() -> JobAnalysisService:
 
     repository = get_evidence_repository()
 
+    cv_proposal_service = CVProposalGenerationService(
+        repository=repository,
+        generator=create_cv_proposal_generator(),
+    )
+
+    cv_claim_verification_service = CVClaimVerificationService(
+        repository=repository,
+        verifier=create_cv_claim_verifier(),
+    )
+
     return JobAnalysisService(
         requirement_extractor=create_requirement_extractor(),
         evidence_discovery_runner=(create_evidence_discovery_runner(repository)),
+        cv_proposal_service=cv_proposal_service,
+        cv_claim_verification_service=(cv_claim_verification_service),
     )
