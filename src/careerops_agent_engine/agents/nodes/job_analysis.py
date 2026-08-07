@@ -21,7 +21,7 @@ from careerops_agent_engine.application.services.cv_proposals import (
     CVProposalGenerationService,
 )
 from careerops_agent_engine.application.services.cv_review import (
-    validate_initial_review_decision,
+    validate_review_decision,
 )
 from careerops_agent_engine.application.services.fit_scoring import (
     calculate_evidence_weighted_fit,
@@ -286,7 +286,7 @@ def create_verify_cv_proposals_node(
 def request_human_review(
     state: JobAnalysisState,
 ) -> JobAnalysisUpdate:
-    """Pause the graph until a human reviews verified proposals."""
+    """Pause until a human reviews verified CV proposals."""
 
     reviewable_ids = state.get(
         "reviewable_proposal_ids",
@@ -327,6 +327,7 @@ def request_human_review(
             ],
             "allowed_actions": [
                 ReviewAction.APPROVE.value,
+                ReviewAction.EDIT.value,
                 ReviewAction.REJECT.value,
             ],
         }
@@ -334,13 +335,19 @@ def request_human_review(
 
     decision = CVReviewDecision.model_validate(raw_decision)
 
-    validate_initial_review_decision(
+    validate_review_decision(
         decision=decision,
         reviewable_proposal_ids=reviewable_ids,
+        allowed_actions={
+            ReviewAction.APPROVE,
+            ReviewAction.EDIT,
+            ReviewAction.REJECT,
+        },
     )
 
     return {
         "review_decision": decision.model_dump(mode="json"),
+        "review_target_proposal_ids": list(reviewable_ids),
         "audit_events": [
             {
                 "node": "request_human_review",
@@ -350,10 +357,252 @@ def request_human_review(
     }
 
 
+def apply_human_edits(
+    state: JobAnalysisState,
+) -> JobAnalysisUpdate:
+    """Apply human replacement text to proposals."""
+
+    decision_payload = state.get("review_decision")
+
+    if decision_payload is None:
+        raise ValueError("Human edits require a review decision.")
+
+    decision = CVReviewDecision.model_validate(decision_payload)
+
+    if decision.action is not ReviewAction.EDIT:
+        raise ValueError("Human-edit processing requires an edit decision.")
+
+    target_ids = state.get(
+        "review_target_proposal_ids",
+        [],
+    )
+
+    validate_review_decision(
+        decision=decision,
+        reviewable_proposal_ids=target_ids,
+        allowed_actions={
+            ReviewAction.EDIT,
+        },
+    )
+
+    edits_by_id = {edit.proposal_id: edit.edited_text for edit in decision.edits}
+
+    proposals = [
+        CVChangeProposal.model_validate(payload)
+        for payload in state.get("cv_proposals", [])
+    ]
+
+    updated_proposals: list[CVChangeProposal] = []
+
+    for proposal in proposals:
+        edited_text = edits_by_id.get(proposal.proposal_id)
+
+        if edited_text is None:
+            updated_proposals.append(proposal)
+            continue
+
+        payload = proposal.model_dump(mode="python")
+        payload["proposed_text"] = edited_text
+
+        updated_proposals.append(CVChangeProposal.model_validate(payload))
+
+    return {
+        "cv_proposals": [
+            proposal.model_dump(mode="json") for proposal in updated_proposals
+        ],
+        "edited_proposal_ids": sorted(edits_by_id),
+        "audit_events": [
+            {
+                "node": "apply_human_edits",
+                "event": "human_edits_applied",
+            }
+        ],
+    }
+
+
+def create_reverify_human_edits_node(
+    verification_service: CVClaimVerificationService,
+) -> Callable[[JobAnalysisState], JobAnalysisUpdate]:
+    """Reverify every proposal changed by the human."""
+
+    def reverify_human_edits(
+        state: JobAnalysisState,
+    ) -> JobAnalysisUpdate:
+        edited_ids = set(
+            state.get(
+                "edited_proposal_ids",
+                [],
+            )
+        )
+
+        if not edited_ids:
+            raise ValueError(
+                "Edited proposal verification requires at least one edited proposal."
+            )
+
+        proposals = [
+            CVChangeProposal.model_validate(payload)
+            for payload in state.get(
+                "cv_proposals",
+                [],
+            )
+        ]
+
+        existing_reports = [
+            CVClaimVerificationReport.model_validate(payload)
+            for payload in state.get(
+                "claim_verification_reports",
+                [],
+            )
+        ]
+
+        reports_by_id = {report.proposal_id: report for report in existing_reports}
+
+        proposals_by_id = {proposal.proposal_id: proposal for proposal in proposals}
+
+        for proposal_id in edited_ids:
+            proposal = proposals_by_id.get(proposal_id)
+
+            if proposal is None:
+                raise ValueError(
+                    f"Edited proposal is missing from workflow state: {proposal_id}"
+                )
+
+            report = verification_service.verify_proposal(
+                user_id=state["user_id"],
+                proposal=proposal,
+            )
+
+            reports_by_id[proposal_id] = report
+
+        target_ids = set(
+            state.get(
+                "review_target_proposal_ids",
+                [],
+            )
+        )
+
+        failed_ids = sorted(
+            proposal_id
+            for proposal_id in target_ids
+            if (
+                proposal_id not in reports_by_id
+                or not reports_by_id[proposal_id].fully_supported
+            )
+        )
+
+        passed_ids = sorted(target_ids - set(failed_ids))
+
+        existing_non_target_blocked = (
+            set(
+                state.get(
+                    "blocked_proposal_ids",
+                    [],
+                )
+            )
+            - target_ids
+        )
+
+        blocked_ids = sorted(existing_non_target_blocked | set(failed_ids))
+
+        ordered_reports = [
+            reports_by_id[proposal.proposal_id]
+            for proposal in proposals
+            if proposal.proposal_id in reports_by_id
+        ]
+
+        return {
+            "claim_verification_reports": [
+                report.model_dump(mode="json") for report in ordered_reports
+            ],
+            "reviewable_proposal_ids": passed_ids,
+            "blocked_proposal_ids": blocked_ids,
+            "edit_verification_failed_ids": (failed_ids),
+            "audit_events": [
+                {
+                    "node": "reverify_human_edits",
+                    "event": "human_edits_reverified",
+                }
+            ],
+        }
+
+    return reverify_human_edits
+
+
+def request_edit_rework(
+    state: JobAnalysisState,
+) -> JobAnalysisUpdate:
+    """Pause again when human-edited wording fails verification."""
+
+    target_ids = state.get(
+        "review_target_proposal_ids",
+        [],
+    )
+    target_id_set = set(target_ids)
+
+    proposals = [
+        CVChangeProposal.model_validate(payload)
+        for payload in state.get("cv_proposals", [])
+    ]
+
+    reports = [
+        CVClaimVerificationReport.model_validate(payload)
+        for payload in state.get(
+            "claim_verification_reports",
+            [],
+        )
+    ]
+
+    target_proposals = [
+        proposal for proposal in proposals if proposal.proposal_id in target_id_set
+    ]
+
+    target_reports = [
+        report for report in reports if report.proposal_id in target_id_set
+    ]
+
+    raw_decision = interrupt(
+        {
+            "type": "cv_proposal_review",
+            "proposals": [
+                proposal.model_dump(mode="json") for proposal in target_proposals
+            ],
+            "verification_reports": [
+                report.model_dump(mode="json") for report in target_reports
+            ],
+            "allowed_actions": [
+                ReviewAction.EDIT.value,
+                ReviewAction.REJECT.value,
+            ],
+        }
+    )
+
+    decision = CVReviewDecision.model_validate(raw_decision)
+
+    validate_review_decision(
+        decision=decision,
+        reviewable_proposal_ids=target_ids,
+        allowed_actions={
+            ReviewAction.EDIT,
+            ReviewAction.REJECT,
+        },
+    )
+
+    return {
+        "review_decision": decision.model_dump(mode="json"),
+        "audit_events": [
+            {
+                "node": "request_edit_rework",
+                "event": "human_edit_review_received",
+            }
+        ],
+    }
+
+
 def finalize_human_review(
     state: JobAnalysisState,
 ) -> JobAnalysisUpdate:
-    """Apply an approved or rejected human review decision."""
+    """Apply the final human review outcome."""
 
     decision_payload = state.get("review_decision")
 
@@ -379,6 +628,45 @@ def finalize_human_review(
     elif decision.action is ReviewAction.REJECT:
         final_proposals = []
         review_status = ApprovalStatus.REJECTED
+
+    elif decision.action is ReviewAction.EDIT:
+        target_ids = set(
+            state.get(
+                "review_target_proposal_ids",
+                [],
+            )
+        )
+
+        reports = [
+            CVClaimVerificationReport.model_validate(payload)
+            for payload in state.get(
+                "claim_verification_reports",
+                [],
+            )
+        ]
+
+        reports_by_id = {report.proposal_id: report for report in reports}
+
+        unverified_ids = [
+            proposal_id
+            for proposal_id in target_ids
+            if (
+                proposal_id not in reports_by_id
+                or not reports_by_id[proposal_id].fully_supported
+            )
+        ]
+
+        if unverified_ids:
+            raise ValueError(
+                "Human-edited proposals cannot be finalized "
+                "until every edit passes claim verification."
+            )
+
+        final_proposals = [
+            proposal for proposal in proposals if proposal.proposal_id in target_ids
+        ]
+
+        review_status = ApprovalStatus.EDITED
 
     else:
         raise ValueError("Unexpected review action reached finalization.")

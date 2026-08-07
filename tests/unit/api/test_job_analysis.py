@@ -174,7 +174,7 @@ class FakeCVProposalGenerator:
 
 
 class FakeClaimVerifier:
-    """Verify the generated proposal."""
+    """Verify grounded text and reject an invented latency metric."""
 
     def verify(
         self,
@@ -182,7 +182,30 @@ class FakeClaimVerifier:
         proposal: CVChangeProposal,
         approved_evidence: Sequence[CareerEvidence],
     ) -> CVClaimVerificationReport:
-        """Return a fully supported report."""
+        """Return verification based on current proposal wording."""
+
+        lowered_text = proposal.proposed_text.casefold()
+
+        if "70" in lowered_text and "latency" in lowered_text:
+            unsupported_claim = "Reduced production latency by 70 percent."
+
+            return CVClaimVerificationReport(
+                proposal_id=proposal.proposal_id,
+                claims=[
+                    ClaimAssessment(
+                        claim_text=unsupported_claim,
+                        supported=False,
+                        supporting_evidence_ids=[],
+                        explanation=(
+                            "No approved evidence supports this latency metric."
+                        ),
+                    )
+                ],
+                coverage_complete=True,
+                coverage_notes=[],
+                fully_supported=False,
+                unsupported_claims=[unsupported_claim],
+            )
 
         return CVClaimVerificationReport(
             proposal_id=proposal.proposal_id,
@@ -324,6 +347,7 @@ def test_job_analysis_pauses_then_approves(
     assert paused["review"]["type"] == ("cv_proposal_review")
     assert paused["review"]["allowed_actions"] == [
         "approve",
+        "edit",
         "reject",
     ]
 
@@ -439,7 +463,7 @@ def test_wrong_proposal_id_is_rejected(
 
     assert response.status_code == 422
 
-    assert "approve every reviewable proposal" in (response.json()["detail"])
+    assert "outside the current review set" in (response.json()["detail"])
 
 
 def test_other_user_cannot_resume_thread(
@@ -526,3 +550,90 @@ def test_client_cannot_submit_internal_workflow_state(
     )
 
     assert response.status_code == 422
+
+
+def test_unsafe_human_edit_is_blocked_then_corrected(
+    client: TestClient,
+) -> None:
+    """Unsafe human wording should pause again until corrected."""
+
+    paused = start_reviewable_analysis(
+        client,
+        job_id="JOB-API-EDIT-REWORK",
+    )
+
+    thread_id = paused["thread_id"]
+    proposal_id = paused["cv_proposals"][0]["proposal_id"]
+
+    unsafe_response = client.post(
+        f"/api/v1/job-analysis/{thread_id}/review",
+        headers={
+            "X-User-ID": "USER-API-001",
+        },
+        json={
+            "action": "edit",
+            "approved_proposal_ids": [],
+            "rejected_proposal_ids": [],
+            "edits": [
+                {
+                    "proposal_id": proposal_id,
+                    "edited_text": (
+                        "Built a Python FastAPI application "
+                        "and reduced production latency by "
+                        "70 percent."
+                    ),
+                }
+            ],
+            "reviewer_comment": ("Testing unsupported human wording."),
+        },
+    )
+
+    assert unsafe_response.status_code == 200
+
+    rework = unsafe_response.json()
+
+    assert rework["status"] == "awaiting_review"
+
+    assert rework["review"]["allowed_actions"] == [
+        "edit",
+        "reject",
+    ]
+
+    assert rework["reviewable_proposal_ids"] == []
+    assert proposal_id in rework["blocked_proposal_ids"]
+
+    report = rework["claim_verification_reports"][0]
+
+    assert report["fully_supported"] is False
+    assert report["unsupported_claims"]
+
+    corrected_response = client.post(
+        f"/api/v1/job-analysis/{thread_id}/review",
+        headers={
+            "X-User-ID": "USER-API-001",
+        },
+        json={
+            "action": "edit",
+            "approved_proposal_ids": [],
+            "rejected_proposal_ids": [],
+            "edits": [
+                {
+                    "proposal_id": proposal_id,
+                    "edited_text": ("Built a Python application using FastAPI."),
+                }
+            ],
+            "reviewer_comment": ("Removed unsupported metric."),
+        },
+    )
+
+    assert corrected_response.status_code == 200
+
+    completed = corrected_response.json()
+
+    assert completed["status"] == "completed"
+    assert completed["review_status"] == "edited"
+
+    assert (
+        completed["final_cv_proposals"][0]["proposed_text"]
+        == "Built a Python application using FastAPI."
+    )

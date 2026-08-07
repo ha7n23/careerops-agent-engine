@@ -8,14 +8,17 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 from careerops_agent_engine.agents.nodes.job_analysis import (
+    apply_human_edits,
     calculate_fit,
     complete_analysis,
     create_discover_evidence_node,
     create_extract_requirements_node,
     create_generate_cv_proposals_node,
+    create_reverify_human_edits_node,
     create_verify_cv_proposals_node,
     finalize_human_review,
     mark_invalid,
+    request_edit_rework,
     request_human_review,
     validate_job_input,
 )
@@ -34,6 +37,10 @@ from careerops_agent_engine.application.services.cv_claim_verification import (
 from careerops_agent_engine.application.services.cv_proposals import (
     CVProposalGenerationService,
 )
+from careerops_agent_engine.domain.enums import ReviewAction
+from careerops_agent_engine.domain.models.approval import (
+    CVReviewDecision,
+)
 
 
 def route_after_validation(
@@ -50,12 +57,41 @@ def route_after_validation(
 def route_after_proposal_verification(
     state: JobAnalysisState,
 ) -> Literal["review", "complete"]:
-    """Require human review only when verified proposals exist."""
+    """Require human review only for verified proposals."""
 
     if state.get("reviewable_proposal_ids"):
         return "review"
 
     return "complete"
+
+
+def route_after_human_review(
+    state: JobAnalysisState,
+) -> Literal["edit", "finalize"]:
+    """Route the current human decision."""
+
+    decision_payload = state.get("review_decision")
+
+    if decision_payload is None:
+        raise ValueError("Human-review routing requires a decision.")
+
+    decision = CVReviewDecision.model_validate(decision_payload)
+
+    if decision.action is ReviewAction.EDIT:
+        return "edit"
+
+    return "finalize"
+
+
+def route_after_edit_verification(
+    state: JobAnalysisState,
+) -> Literal["passed", "failed"]:
+    """Determine whether edited wording may be finalized."""
+
+    if state.get("edit_verification_failed_ids"):
+        return "failed"
+
+    return "passed"
 
 
 def build_job_analysis_graph(
@@ -70,7 +106,7 @@ def build_job_analysis_graph(
     JobAnalysisState,
     JobAnalysisState,
 ]:
-    """Compile the CareerOps job-analysis workflow."""
+    """Compile the durable CareerOps job-analysis workflow."""
 
     builder = StateGraph(JobAnalysisState)
 
@@ -90,6 +126,11 @@ def build_job_analysis_graph(
         create_verify_cv_proposals_node(cv_claim_verification_service)
     )
 
+    reverify_human_edits_node = RunnableLambda(
+        create_reverify_human_edits_node(cv_claim_verification_service)
+    )
+
+    # Initial workflow nodes.
     builder.add_node(
         "validate_job_input",
         validate_job_input,
@@ -106,6 +147,8 @@ def build_job_analysis_graph(
         "calculate_fit",
         calculate_fit,
     )
+
+    # Proposal generation and verification.
     builder.add_node(
         "generate_cv_proposals",
         generate_cv_proposals_node,
@@ -114,14 +157,30 @@ def build_job_analysis_graph(
         "verify_cv_proposals",
         verify_cv_proposals_node,
     )
+
+    # Human-in-the-loop nodes.
     builder.add_node(
         "request_human_review",
         request_human_review,
     )
     builder.add_node(
+        "apply_human_edits",
+        apply_human_edits,
+    )
+    builder.add_node(
+        "reverify_human_edits",
+        reverify_human_edits_node,
+    )
+    builder.add_node(
+        "request_edit_rework",
+        request_edit_rework,
+    )
+    builder.add_node(
         "finalize_human_review",
         finalize_human_review,
     )
+
+    # Terminal nodes.
     builder.add_node(
         "complete_analysis",
         complete_analysis,
@@ -131,6 +190,7 @@ def build_job_analysis_graph(
         mark_invalid,
     )
 
+    # Entry point.
     builder.add_edge(
         START,
         "validate_job_input",
@@ -145,6 +205,7 @@ def build_job_analysis_graph(
         },
     )
 
+    # Main analysis pipeline.
     builder.add_edge(
         "extract_requirements",
         "discover_evidence",
@@ -162,6 +223,7 @@ def build_job_analysis_graph(
         "verify_cv_proposals",
     )
 
+    # Only fully supported proposals reach human review.
     builder.add_conditional_edges(
         "verify_cv_proposals",
         route_after_proposal_verification,
@@ -171,10 +233,43 @@ def build_job_analysis_graph(
         },
     )
 
-    builder.add_edge(
+    # Approve/reject finalize directly.
+    # Edits must be applied and reverified.
+    builder.add_conditional_edges(
         "request_human_review",
-        "finalize_human_review",
+        route_after_human_review,
+        {
+            "edit": "apply_human_edits",
+            "finalize": "finalize_human_review",
+        },
     )
+
+    builder.add_edge(
+        "apply_human_edits",
+        "reverify_human_edits",
+    )
+
+    # Safe edits may finalize.
+    # Unsupported edits return to another human interrupt.
+    builder.add_conditional_edges(
+        "reverify_human_edits",
+        route_after_edit_verification,
+        {
+            "passed": "finalize_human_review",
+            "failed": "request_edit_rework",
+        },
+    )
+
+    # After a failed edit, the reviewer may edit again or reject.
+    builder.add_conditional_edges(
+        "request_edit_rework",
+        route_after_human_review,
+        {
+            "edit": "apply_human_edits",
+            "finalize": "finalize_human_review",
+        },
+    )
+
     builder.add_edge(
         "finalize_human_review",
         "complete_analysis",
@@ -184,6 +279,7 @@ def build_job_analysis_graph(
         "complete_analysis",
         END,
     )
+
     builder.add_edge(
         "mark_invalid",
         END,

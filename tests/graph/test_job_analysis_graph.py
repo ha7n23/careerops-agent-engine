@@ -26,6 +26,7 @@ from careerops_agent_engine.domain.enums import (
 )
 from careerops_agent_engine.domain.models.approval import (
     CVReviewDecision,
+    ProposalEdit,
 )
 from careerops_agent_engine.domain.models.cv import CVChangeProposal
 from careerops_agent_engine.domain.models.evidence import (
@@ -147,7 +148,7 @@ class FakeCVProposalGenerator:
 
 
 class FakeClaimVerifier:
-    """Mark the generated Python proposal as supported."""
+    """Verify safe wording and reject an invented latency metric."""
 
     def verify(
         self,
@@ -155,9 +156,34 @@ class FakeClaimVerifier:
         proposal: CVChangeProposal,
         approved_evidence: Sequence[CareerEvidence],
     ) -> CVClaimVerificationReport:
-        """Return a complete supported report."""
+        """Return a report based on the proposal's current text."""
 
         assert approved_evidence
+
+        lowered_text = proposal.proposed_text.casefold()
+
+        has_invented_metric = "70" in lowered_text and "latency" in lowered_text
+
+        if has_invented_metric:
+            unsupported_claim = "Reduced production latency by 70 percent."
+
+            return CVClaimVerificationReport(
+                proposal_id=proposal.proposal_id,
+                claims=[
+                    ClaimAssessment(
+                        claim_text=unsupported_claim,
+                        supported=False,
+                        supporting_evidence_ids=[],
+                        explanation=(
+                            "No approved evidence supports this latency metric."
+                        ),
+                    )
+                ],
+                coverage_complete=True,
+                coverage_notes=[],
+                fully_supported=False,
+                unsupported_claims=[unsupported_claim],
+            )
 
         return CVClaimVerificationReport(
             proposal_id=proposal.proposal_id,
@@ -167,7 +193,7 @@ class FakeClaimVerifier:
                     supported=True,
                     supporting_evidence_ids=[approved_evidence[0].evidence_id],
                     explanation=(
-                        "The approved project evidence directly supports the proposal."
+                        "The approved project evidence directly supports this wording."
                     ),
                 )
             ],
@@ -272,6 +298,7 @@ def test_valid_job_pauses_then_resumes_with_approval() -> None:
     assert payload["type"] == "cv_proposal_review"
     assert payload["allowed_actions"] == [
         "approve",
+        "edit",
         "reject",
     ]
 
@@ -379,3 +406,169 @@ def test_invalid_job_skips_human_review() -> None:
         "job_input_invalid",
         "job_analysis_rejected",
     ]
+
+
+def test_human_edit_is_reverified_before_completion() -> None:
+    """A grounded human edit should be verified before finalization."""
+
+    checkpointer = InMemorySaver()
+    graph = build_test_graph(checkpointer)
+
+    config: RunnableConfig = {
+        "configurable": {
+            "thread_id": "THREAD-GRAPH-SAFE-EDIT",
+        }
+    }
+
+    paused = graph.invoke(
+        {
+            "job_id": "JOB-SAFE-EDIT",
+            "user_id": "USER-TEST-001",
+            "job_description": (
+                "Strong Python development experience is required for this role."
+            ),
+            "audit_events": [],
+        },
+        config=config,
+    )
+
+    proposal = CVChangeProposal.model_validate(paused["cv_proposals"][0])
+
+    edited_text = "Built a Python application using FastAPI."
+
+    decision = CVReviewDecision(
+        action=ReviewAction.EDIT,
+        edits=[
+            ProposalEdit(
+                proposal_id=proposal.proposal_id,
+                edited_text=edited_text,
+            )
+        ],
+    )
+
+    resumed = graph.invoke(
+        Command(resume=decision.model_dump(mode="json")),
+        config=config,
+    )
+
+    assert "__interrupt__" not in resumed
+    assert resumed["status"] == "completed"
+    assert resumed["review_status"] == "edited"
+
+    assert resumed["edit_verification_failed_ids"] == []
+    assert resumed["reviewable_proposal_ids"] == [proposal.proposal_id]
+
+    assert len(resumed["final_cv_proposals"]) == 1
+
+    final_proposal = CVChangeProposal.model_validate(resumed["final_cv_proposals"][0])
+
+    assert final_proposal.proposed_text == edited_text
+
+    assert "human_edits_applied" in [
+        event["event"] for event in resumed["audit_events"]
+    ]
+
+    assert "human_edits_reverified" in [
+        event["event"] for event in resumed["audit_events"]
+    ]
+
+
+def test_unsupported_human_edit_requires_rework() -> None:
+    """An invented human metric must trigger another interrupt."""
+
+    checkpointer = InMemorySaver()
+    graph = build_test_graph(checkpointer)
+
+    config: RunnableConfig = {
+        "configurable": {
+            "thread_id": "THREAD-GRAPH-UNSAFE-EDIT",
+        }
+    }
+
+    paused = graph.invoke(
+        {
+            "job_id": "JOB-UNSAFE-EDIT",
+            "user_id": "USER-TEST-001",
+            "job_description": (
+                "Strong Python development experience is required for this role."
+            ),
+            "audit_events": [],
+        },
+        config=config,
+    )
+
+    proposal = CVChangeProposal.model_validate(paused["cv_proposals"][0])
+
+    unsafe_decision = CVReviewDecision(
+        action=ReviewAction.EDIT,
+        edits=[
+            ProposalEdit(
+                proposal_id=proposal.proposal_id,
+                edited_text=(
+                    "Built a Python FastAPI application and "
+                    "reduced production latency by 70 percent."
+                ),
+            )
+        ],
+    )
+
+    rework = graph.invoke(
+        Command(resume=unsafe_decision.model_dump(mode="json")),
+        config=config,
+    )
+
+    assert "__interrupt__" in rework
+    assert rework["edit_verification_failed_ids"] == [proposal.proposal_id]
+    assert rework["reviewable_proposal_ids"] == []
+    assert proposal.proposal_id in (rework["blocked_proposal_ids"])
+
+    interrupts = rework["__interrupt__"]
+
+    assert len(interrupts) == 1
+
+    payload = interrupts[0].value
+
+    assert payload["type"] == "cv_proposal_review"
+    assert payload["allowed_actions"] == [
+        "edit",
+        "reject",
+    ]
+
+    verification_report = CVClaimVerificationReport.model_validate(
+        payload["verification_reports"][0]
+    )
+
+    assert verification_report.fully_supported is False
+    assert verification_report.unsupported_claims == [
+        "Reduced production latency by 70 percent."
+    ]
+
+    corrected_decision = CVReviewDecision(
+        action=ReviewAction.EDIT,
+        edits=[
+            ProposalEdit(
+                proposal_id=proposal.proposal_id,
+                edited_text=("Built a Python application using FastAPI."),
+            )
+        ],
+    )
+
+    completed = graph.invoke(
+        Command(resume=corrected_decision.model_dump(mode="json")),
+        config=config,
+    )
+
+    assert completed["status"] == "completed"
+    assert completed["review_status"] == "edited"
+    assert completed["edit_verification_failed_ids"] == []
+
+    final_proposal = CVChangeProposal.model_validate(completed["final_cv_proposals"][0])
+
+    assert final_proposal.proposed_text == ("Built a Python application using FastAPI.")
+
+    events = [event["event"] for event in completed["audit_events"]]
+
+    # Verification occurred once after each human edit.
+    assert events.count("human_edits_reverified") == 2
+
+    assert "human_edit_review_received" in events

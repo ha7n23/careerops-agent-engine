@@ -9,27 +9,50 @@ from careerops_agent_engine.domain.models.approval import (
 )
 
 
-def validate_initial_review_decision(
+def validate_review_decision(
     *,
     decision: CVReviewDecision,
     reviewable_proposal_ids: list[str],
+    allowed_actions: set[ReviewAction],
 ) -> None:
-    """Validate the first approve/reject review contract."""
+    """Validate a human decision against the current review target."""
+
+    if decision.action not in allowed_actions:
+        allowed_display = ", ".join(sorted(action.value for action in allowed_actions))
+
+        raise CVReviewValidationError(
+            f"This review stage accepts only: {allowed_display}."
+        )
 
     expected_ids = set(reviewable_proposal_ids)
 
     if not expected_ids:
+        raise CVReviewValidationError("Human review requires at least one proposal.")
+
+    approved_ids = set(decision.approved_proposal_ids)
+    rejected_ids = set(decision.rejected_proposal_ids)
+    edited_ids = {edit.proposal_id for edit in decision.edits}
+
+    referenced_ids = approved_ids | rejected_ids | edited_ids
+
+    unknown_ids = referenced_ids - expected_ids
+
+    if unknown_ids:
+        unknown_display = ", ".join(sorted(unknown_ids))
+
         raise CVReviewValidationError(
-            "Human review requires at least one reviewable proposal."
+            "Review decision references proposals outside "
+            "the current review set: "
+            f"{unknown_display}"
         )
 
     if decision.action is ReviewAction.APPROVE:
-        if set(decision.approved_proposal_ids) != expected_ids:
+        if approved_ids != expected_ids:
             raise CVReviewValidationError(
                 "An approval decision must approve every reviewable proposal."
             )
 
-        if decision.rejected_proposal_ids or decision.edits:
+        if rejected_ids or edited_ids:
             raise CVReviewValidationError(
                 "An approval decision cannot reject or edit proposals."
             )
@@ -37,13 +60,31 @@ def validate_initial_review_decision(
         return
 
     if decision.action is ReviewAction.REJECT:
-        if set(decision.rejected_proposal_ids) != expected_ids:
+        if rejected_ids != expected_ids:
             raise CVReviewValidationError(
                 "A rejection decision must reject every reviewable proposal."
             )
 
+        if approved_ids or edited_ids:
+            raise CVReviewValidationError(
+                "A rejection decision cannot approve or edit proposals."
+            )
+
         return
 
-    raise CVReviewValidationError(
-        "This workflow stage currently accepts only approve or reject decisions."
-    )
+    if decision.action is ReviewAction.EDIT:
+        if approved_ids or rejected_ids:
+            raise CVReviewValidationError(
+                "This workflow stage does not yet support "
+                "mixed approve, reject and edit decisions."
+            )
+
+        if edited_ids != expected_ids:
+            raise CVReviewValidationError(
+                "An edit decision must provide replacement "
+                "text for every proposal under review."
+            )
+
+        return
+
+    raise CVReviewValidationError("Regeneration is not enabled at this workflow stage.")

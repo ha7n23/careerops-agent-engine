@@ -152,7 +152,12 @@ class JobAnalysisService:
                     "The requested review thread is unavailable."
                 )
 
-            if "request_human_review" not in snapshot.next:
+            allowed_review_nodes = {
+                "request_human_review",
+                "request_edit_rework",
+            }
+
+            if not (set(snapshot.next) & allowed_review_nodes):
                 raise JobAnalysisThreadUnavailableError(
                     "The requested review thread is unavailable."
                 )
