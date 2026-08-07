@@ -1,9 +1,13 @@
-"""API contracts for job-analysis operations."""
+"""API contracts for durable job-analysis operations."""
 
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from careerops_agent_engine.domain.enums import (
+    ApprovalStatus,
+    ReviewAction,
+)
 from careerops_agent_engine.domain.models.cv import (
     CVChangeProposal,
 )
@@ -19,7 +23,7 @@ from careerops_agent_engine.domain.models.verification import (
 
 
 class JobAnalysisRequest(BaseModel):
-    """Request to extract and analyse job requirements."""
+    """Request to start one job-analysis workflow."""
 
     model_config = ConfigDict(
         extra="forbid",
@@ -43,10 +47,21 @@ class AuditEventResponse(BaseModel):
     event: str
 
 
-class JobAnalysisResponse(BaseModel):
-    """Evidence-grounded job and CV analysis."""
+class CVProposalReviewResponse(BaseModel):
+    """Human-review payload exposed when the graph pauses."""
 
-    status: Literal["completed"]
+    type: Literal["cv_proposal_review"]
+
+    proposals: list[CVChangeProposal]
+    verification_reports: list[CVClaimVerificationReport]
+
+    allowed_actions: list[ReviewAction]
+
+
+class JobAnalysisResultBase(BaseModel):
+    """Fields shared by paused and completed analyses."""
+
+    thread_id: str
 
     job_id: str
     role_title: str | None
@@ -66,3 +81,23 @@ class JobAnalysisResponse(BaseModel):
     blocked_proposal_ids: list[str]
 
     audit_events: list[AuditEventResponse]
+
+
+class JobAnalysisAwaitingReviewResponse(JobAnalysisResultBase):
+    """Response returned when execution pauses for review."""
+
+    status: Literal["awaiting_review"]
+    review: CVProposalReviewResponse
+
+
+class JobAnalysisCompletedResponse(JobAnalysisResultBase):
+    """Response returned after the graph reaches completion."""
+
+    status: Literal["completed"]
+
+    review_status: ApprovalStatus | None = None
+
+    final_cv_proposals: list[CVChangeProposal] = Field(default_factory=list)
+
+
+JobAnalysisResponse = JobAnalysisAwaitingReviewResponse | JobAnalysisCompletedResponse

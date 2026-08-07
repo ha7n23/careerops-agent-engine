@@ -19,6 +19,9 @@ from careerops_agent_engine.application.services.cv_proposals import (
 from careerops_agent_engine.application.services.job_analysis import (
     JobAnalysisService,
 )
+from careerops_agent_engine.infrastructure.database.checkpoint import (
+    open_postgres_checkpointer,
+)
 from careerops_agent_engine.infrastructure.database.session import (
     create_database_engine,
     create_session_factory,
@@ -93,4 +96,5 @@ def get_job_analysis_service() -> JobAnalysisService:
         evidence_discovery_runner=(create_evidence_discovery_runner(repository)),
         cv_proposal_service=cv_proposal_service,
         cv_claim_verification_service=(cv_claim_verification_service),
+        checkpointer_factory=open_postgres_checkpointer,
     )

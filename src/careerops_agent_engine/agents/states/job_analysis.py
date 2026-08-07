@@ -39,6 +39,10 @@ class JobAnalysisState(TypedDict):
     reviewable_proposal_ids: NotRequired[list[str]]
     blocked_proposal_ids: NotRequired[list[str]]
 
+    review_decision: NotRequired[dict[str, object]]
+    review_status: NotRequired[str]
+    final_cv_proposals: NotRequired[list[dict[str, object]]]
+
     status: NotRequired[JobAnalysisStatus]
     validation_error: NotRequired[str | None]
 
@@ -59,6 +63,10 @@ class JobAnalysisUpdate(TypedDict, total=False):
 
     reviewable_proposal_ids: list[str]
     blocked_proposal_ids: list[str]
+
+    review_decision: dict[str, object]
+    review_status: str
+    final_cv_proposals: list[dict[str, object]]
 
     status: JobAnalysisStatus
     validation_error: str | None

@@ -2,6 +2,8 @@
 
 from collections.abc import Callable
 
+from langgraph.types import interrupt
+
 from careerops_agent_engine.agents.states.job_analysis import (
     JobAnalysisState,
     JobAnalysisUpdate,
@@ -18,8 +20,18 @@ from careerops_agent_engine.application.services.cv_claim_verification import (
 from careerops_agent_engine.application.services.cv_proposals import (
     CVProposalGenerationService,
 )
+from careerops_agent_engine.application.services.cv_review import (
+    validate_initial_review_decision,
+)
 from careerops_agent_engine.application.services.fit_scoring import (
     calculate_evidence_weighted_fit,
+)
+from careerops_agent_engine.domain.enums import (
+    ApprovalStatus,
+    ReviewAction,
+)
+from careerops_agent_engine.domain.models.approval import (
+    CVReviewDecision,
 )
 from careerops_agent_engine.domain.models.cv import (
     CVChangeProposal,
@@ -29,6 +41,9 @@ from careerops_agent_engine.domain.models.evidence import (
 )
 from careerops_agent_engine.domain.models.job import (
     JobRequirement,
+)
+from careerops_agent_engine.domain.models.verification import (
+    CVClaimVerificationReport,
 )
 
 MINIMUM_JOB_DESCRIPTION_LENGTH = 20
@@ -266,6 +281,120 @@ def create_verify_cv_proposals_node(
         }
 
     return verify_cv_proposals
+
+
+def request_human_review(
+    state: JobAnalysisState,
+) -> JobAnalysisUpdate:
+    """Pause the graph until a human reviews verified proposals."""
+
+    reviewable_ids = state.get(
+        "reviewable_proposal_ids",
+        [],
+    )
+
+    proposals = [
+        CVChangeProposal.model_validate(payload)
+        for payload in state.get("cv_proposals", [])
+    ]
+
+    reports = [
+        CVClaimVerificationReport.model_validate(payload)
+        for payload in state.get(
+            "claim_verification_reports",
+            [],
+        )
+    ]
+
+    reviewable_id_set = set(reviewable_ids)
+
+    reviewable_proposals = [
+        proposal for proposal in proposals if proposal.proposal_id in reviewable_id_set
+    ]
+
+    reviewable_reports = [
+        report for report in reports if report.proposal_id in reviewable_id_set
+    ]
+
+    raw_decision = interrupt(
+        {
+            "type": "cv_proposal_review",
+            "proposals": [
+                proposal.model_dump(mode="json") for proposal in reviewable_proposals
+            ],
+            "verification_reports": [
+                report.model_dump(mode="json") for report in reviewable_reports
+            ],
+            "allowed_actions": [
+                ReviewAction.APPROVE.value,
+                ReviewAction.REJECT.value,
+            ],
+        }
+    )
+
+    decision = CVReviewDecision.model_validate(raw_decision)
+
+    validate_initial_review_decision(
+        decision=decision,
+        reviewable_proposal_ids=reviewable_ids,
+    )
+
+    return {
+        "review_decision": decision.model_dump(mode="json"),
+        "audit_events": [
+            {
+                "node": "request_human_review",
+                "event": "human_review_received",
+            }
+        ],
+    }
+
+
+def finalize_human_review(
+    state: JobAnalysisState,
+) -> JobAnalysisUpdate:
+    """Apply an approved or rejected human review decision."""
+
+    decision_payload = state.get("review_decision")
+
+    if decision_payload is None:
+        raise ValueError("Human review cannot be finalized without a decision.")
+
+    decision = CVReviewDecision.model_validate(decision_payload)
+
+    proposals = [
+        CVChangeProposal.model_validate(payload)
+        for payload in state.get("cv_proposals", [])
+    ]
+
+    if decision.action is ReviewAction.APPROVE:
+        approved_ids = set(decision.approved_proposal_ids)
+
+        final_proposals = [
+            proposal for proposal in proposals if proposal.proposal_id in approved_ids
+        ]
+
+        review_status = ApprovalStatus.APPROVED
+
+    elif decision.action is ReviewAction.REJECT:
+        final_proposals = []
+        review_status = ApprovalStatus.REJECTED
+
+    else:
+        raise ValueError("Unexpected review action reached finalization.")
+
+    return {
+        "review_status": review_status.value,
+        "final_cv_proposals": [
+            proposal.model_dump(mode="json") for proposal in final_proposals
+        ],
+        "audit_events": [
+            {
+                "node": "finalize_human_review",
+                "event": "human_review_finalized",
+            }
+        ],
+    }
 
 
 def complete_analysis(

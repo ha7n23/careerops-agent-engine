@@ -11,3 +11,11 @@ class CVProposalValidationError(ValueError):
 
 class CVClaimVerificationValidationError(ValueError):
     """Claim-verification output failed deterministic validation."""
+
+
+class CVReviewValidationError(ValueError):
+    """Human CV-review input failed deterministic validation."""
+
+
+class JobAnalysisThreadUnavailableError(ValueError):
+    """A durable review thread cannot be accessed or resumed."""
