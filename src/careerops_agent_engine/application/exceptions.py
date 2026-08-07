@@ -7,3 +7,7 @@ class EvidenceDiscoveryValidationError(ValueError):
 
 class CVProposalValidationError(ValueError):
     """Generated CV proposal failed deterministic validation."""
+
+
+class CVClaimVerificationValidationError(ValueError):
+    """Claim-verification output failed deterministic validation."""

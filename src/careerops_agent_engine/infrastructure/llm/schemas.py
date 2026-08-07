@@ -66,3 +66,30 @@ class GeneratedCVProposalContent(DomainModel):
     )
 
     warnings: list[str] = Field(default_factory=list)
+
+
+class GeneratedClaimAssessment(DomainModel):
+    """Provider assessment of one factual claim."""
+
+    claim_text: str = Field(
+        min_length=1,
+        max_length=1_500,
+    )
+    supported: bool
+
+    supporting_evidence_ids: list[str] = Field(default_factory=list)
+
+    explanation: str = Field(
+        min_length=1,
+        max_length=1_500,
+    )
+
+
+class GeneratedClaimVerification(DomainModel):
+    """Provider result covering all factual proposal claims."""
+
+    claims: list[GeneratedClaimAssessment] = Field(min_length=1)
+
+    coverage_complete: bool
+
+    coverage_notes: list[str] = Field(default_factory=list)
