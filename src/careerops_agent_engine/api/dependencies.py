@@ -4,16 +4,25 @@ from functools import lru_cache
 from typing import Annotated
 
 from fastapi import Header, HTTPException, status
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session, sessionmaker
 
+from careerops_agent_engine.application.ports.evidence_repository import (
+    EvidenceRepository,
+)
 from careerops_agent_engine.application.services.job_analysis import (
     JobAnalysisService,
+)
+from careerops_agent_engine.infrastructure.database.session import (
+    create_database_engine,
+    create_session_factory,
 )
 from careerops_agent_engine.infrastructure.llm.factory import (
     create_evidence_discovery_runner,
     create_requirement_extractor,
 )
-from careerops_agent_engine.infrastructure.repositories.development_evidence import (
-    create_development_evidence_repository,
+from careerops_agent_engine.infrastructure.repositories.sqlalchemy_evidence import (
+    SqlAlchemyEvidenceRepository,
 )
 
 
@@ -35,14 +44,33 @@ def get_authenticated_user_id(
 
 
 @lru_cache
+def get_database_engine() -> Engine:
+    """Create one reusable SQLAlchemy engine per process."""
+
+    return create_database_engine()
+
+
+@lru_cache
+def get_database_session_factory() -> sessionmaker[Session]:
+    """Create one reusable database session factory."""
+
+    return create_session_factory(get_database_engine())
+
+
+@lru_cache
+def get_evidence_repository() -> EvidenceRepository:
+    """Create the PostgreSQL approved-evidence repository."""
+
+    return SqlAlchemyEvidenceRepository(get_database_session_factory())
+
+
+@lru_cache
 def get_job_analysis_service() -> JobAnalysisService:
     """Create one reusable job-analysis service per process."""
 
-    repository = create_development_evidence_repository()
-    requirement_extractor = create_requirement_extractor()
-    evidence_discovery_runner = create_evidence_discovery_runner(repository)
+    repository = get_evidence_repository()
 
     return JobAnalysisService(
-        requirement_extractor=requirement_extractor,
-        evidence_discovery_runner=evidence_discovery_runner,
+        requirement_extractor=create_requirement_extractor(),
+        evidence_discovery_runner=(create_evidence_discovery_runner(repository)),
     )
