@@ -102,3 +102,10 @@ class CareerDocumentStatus(StrEnum):
     UPLOADED = "uploaded"
     EXTRACTED = "extracted"
     QUARANTINED = "quarantined"
+
+
+class EvidenceOverlapScope(StrEnum):
+    """Where a potential evidence duplication was detected."""
+
+    WITHIN_DOCUMENT = "within_document"
+    APPROVED_EVIDENCE = "approved_evidence"

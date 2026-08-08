@@ -1,5 +1,6 @@
 """Application service for grounded CV evidence proposals."""
 
+import re
 from hashlib import sha256
 
 from careerops_agent_engine.application.exceptions import (
@@ -186,6 +187,14 @@ def validate_candidate(
         field_name="claims",
     )
 
+    validate_claim_grounding(
+        candidate=candidate,
+    )
+
+    validate_technology_grounding(
+        candidate=candidate,
+    )
+
 
 def validate_string_list(
     *,
@@ -209,6 +218,64 @@ def validate_string_list(
         )
 
 
+def validate_claim_grounding(
+    *,
+    candidate: CareerEvidenceCandidate,
+) -> None:
+    """Require every factual claim to be extractively grounded."""
+
+    excerpt = normalise_provenance_text(candidate.source_excerpt).casefold()
+
+    for claim in candidate.claims:
+        normalised_claim = normalise_provenance_text(claim).casefold()
+
+        if normalised_claim not in excerpt:
+            raise CVEvidenceProposalValidationError(
+                "Evidence candidate claim is not "
+                "an extractive span of its source excerpt."
+            )
+
+
+def validate_technology_grounding(
+    *,
+    candidate: CareerEvidenceCandidate,
+) -> None:
+    """Require technologies to be explicitly named in the excerpt."""
+
+    for technology in candidate.technologies:
+        if not contains_explicit_text(
+            source=candidate.source_excerpt,
+            value=technology,
+        ):
+            raise CVEvidenceProposalValidationError(
+                "Evidence candidate technology is not "
+                "explicitly present in its source excerpt."
+            )
+
+
+def contains_explicit_text(
+    *,
+    source: str,
+    value: str,
+) -> bool:
+    """Match explicit text with alphanumeric boundaries."""
+
+    normalised_source = normalise_provenance_text(source)
+
+    normalised_value = normalise_provenance_text(value)
+
+    pattern = r"(?<![A-Za-z0-9])" + re.escape(normalised_value) + r"(?![A-Za-z0-9])"
+
+    return (
+        re.search(
+            pattern,
+            normalised_source,
+            flags=re.IGNORECASE,
+        )
+        is not None
+    )
+
+
 def normalise_provenance_text(
     text: str,
 ) -> str:
@@ -229,7 +296,6 @@ def build_evidence_proposal_id(
             document_id,
             str(candidate.source_section_order_index),
             candidate.category.value,
-            normalise_provenance_text(candidate.title).casefold(),
             normalise_provenance_text(candidate.source_excerpt),
         ]
     )

@@ -2,7 +2,7 @@
 
 from langchain_core.prompts import ChatPromptTemplate
 
-PROMPT_VERSION = "cv-evidence-extraction-v1"
+PROMPT_VERSION = "cv-evidence-extraction-v2"
 
 CV_EVIDENCE_EXTRACTION_PROMPT = ChatPromptTemplate.from_messages(
     [
@@ -31,8 +31,13 @@ Grounding rules:
 - Every candidate must identify exactly one source_section_order_index.
 - source_excerpt must be copied from that section's text.
 - source_excerpt must be sufficient to support the candidate.
-- Claims should be atomic and concise.
-- Technologies should contain only explicitly named technologies.
+- Claims must be atomic factual spans copied directly from source_excerpt.
+- Every claim must be an exact contiguous substring of source_excerpt
+  after whitespace normalisation.
+- Never paraphrase, summarise, strengthen, weaken, or add words to a claim.
+- If the source wording is ambiguous, preserve that ambiguity exactly.
+- Technologies should contain only technologies explicitly named
+  inside source_excerpt.
 - Capabilities should describe actions or abilities directly supported
   by the source text.
 - It is valid to return no candidates.
@@ -50,6 +55,15 @@ Category rules:
 - projects: project or achievement.
 - education: education or achievement.
 - certifications: certification.
+
+Examples:
+- Source: "BSc Computer Science, Example University."
+  Valid claim: "BSc Computer Science, Example University."
+  Invalid claim: "Obtained a BSc Computer Science from Example University."
+
+- Source: "Built Python APIs using FastAPI and Docker."
+  Valid claim: "Built Python APIs using FastAPI and Docker."
+  Invalid claim: "Developed production-ready FastAPI microservices."
 
 Important:
 - CV statements remain unverified until a human approves them.

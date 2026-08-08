@@ -103,7 +103,7 @@ def build_valid_candidate() -> CareerEvidenceCandidate:
             "Application containerisation",
         ],
         claims=[
-            "Worked as a Software Engineer at Example Ltd.",
+            "Software Engineer at Example Ltd.",
             "Built Python APIs using FastAPI and Docker.",
         ],
         warnings=[],
@@ -248,3 +248,64 @@ def test_evidence_proposal_id_is_stable() -> None:
     assert first == second
     assert first.startswith("EVP-")
     assert len(first) <= 64
+
+
+def test_paraphrased_claim_is_rejected() -> None:
+    """Model claims must preserve the CV's factual wording."""
+
+    candidate = build_valid_candidate().model_copy(
+        update={"claims": [("Worked as a Software Engineer at Example Ltd.")]}
+    )
+
+    service = CVEvidenceProposalService(extractor=FakeCVEvidenceExtractor([candidate]))
+
+    with pytest.raises(
+        CVEvidenceProposalValidationError,
+        match="claim is not an extractive span",
+    ):
+        service.generate(document=build_document())
+
+
+def test_unmentioned_technology_is_rejected() -> None:
+    """Technologies must be explicitly present in source evidence."""
+
+    candidate = build_valid_candidate().model_copy(
+        update={
+            "technologies": [
+                "Python",
+                "FastAPI",
+                "Docker",
+                "Kubernetes",
+            ]
+        }
+    )
+
+    service = CVEvidenceProposalService(extractor=FakeCVEvidenceExtractor([candidate]))
+
+    with pytest.raises(
+        CVEvidenceProposalValidationError,
+        match=("technology is not explicitly present"),
+    ):
+        service.generate(document=build_document())
+
+
+def test_evidence_proposal_id_ignores_generated_title() -> None:
+    """Model wording changes must not change source evidence identity."""
+
+    candidate = build_valid_candidate()
+
+    renamed_candidate = candidate.model_copy(
+        update={"title": "Alternative Model Generated Title"}
+    )
+
+    original_id = build_evidence_proposal_id(
+        document_id="DOC-001",
+        candidate=candidate,
+    )
+
+    renamed_id = build_evidence_proposal_id(
+        document_id="DOC-001",
+        candidate=renamed_candidate,
+    )
+
+    assert original_id == renamed_id

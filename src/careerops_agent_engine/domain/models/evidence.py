@@ -7,6 +7,7 @@ from pydantic import Field, model_validator
 from careerops_agent_engine.domain.enums import (
     CVSection,
     EvidenceCategory,
+    EvidenceOverlapScope,
     EvidenceSourceType,
     MatchStrength,
     VerificationStatus,
@@ -85,6 +86,68 @@ class CareerEvidenceProposal(DomainModel):
     source_references: list[SourceReference] = Field(min_length=1)
 
     warnings: list[str] = Field(default_factory=list)
+
+
+class CareerEvidenceOverlapFinding(DomainModel):
+    """Deterministic potential duplication requiring review."""
+
+    proposal_id: str = Field(
+        min_length=1,
+        max_length=64,
+    )
+
+    scope: EvidenceOverlapScope
+
+    matching_proposal_id: str | None = Field(
+        default=None,
+        max_length=64,
+    )
+
+    matching_evidence_id: str | None = Field(
+        default=None,
+        max_length=64,
+    )
+
+    matched_claims: list[str] = Field(default_factory=list)
+
+    same_source_excerpt: bool = False
+
+    @model_validator(mode="after")
+    def validate_overlap_target(self) -> Self:
+        """Require the correct comparison identifier for each scope."""
+
+        if self.scope is EvidenceOverlapScope.WITHIN_DOCUMENT:
+            if self.matching_proposal_id is None:
+                raise ValueError(
+                    "Within-document overlap requires a matching proposal identifier."
+                )
+
+            if self.matching_evidence_id is not None:
+                raise ValueError(
+                    "Within-document overlap cannot reference approved evidence."
+                )
+
+            if self.matching_proposal_id == self.proposal_id:
+                raise ValueError("A proposal cannot overlap with itself.")
+
+        if self.scope is EvidenceOverlapScope.APPROVED_EVIDENCE:
+            if self.matching_evidence_id is None:
+                raise ValueError(
+                    "Approved-evidence overlap requires a matching evidence identifier."
+                )
+
+            if self.matching_proposal_id is not None:
+                raise ValueError(
+                    "Approved-evidence overlap cannot "
+                    "reference another pending proposal."
+                )
+
+        if not self.matched_claims and not self.same_source_excerpt:
+            raise ValueError(
+                "Evidence overlap requires a deterministic matching signal."
+            )
+
+        return self
 
 
 class CareerEvidence(DomainModel):
