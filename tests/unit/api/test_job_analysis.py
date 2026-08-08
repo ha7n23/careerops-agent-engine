@@ -32,6 +32,10 @@ from careerops_agent_engine.domain.enums import (
     RequirementCategory,
     VerificationStatus,
 )
+from careerops_agent_engine.domain.models.audit import (
+    CVReviewAuditEntry,
+    JobAnalysisRunSnapshot,
+)
 from careerops_agent_engine.domain.models.cv import (
     CVChangeProposal,
 )
@@ -73,6 +77,89 @@ class SharedCheckpointerFactory:
         )
 
         return nullcontext(saver)
+
+
+class InMemoryJobAnalysisAuditRepository:
+    """Store business audit records in memory for API tests."""
+
+    def __init__(self) -> None:
+        """Create empty run and review stores."""
+
+        self._runs: dict[
+            str,
+            JobAnalysisRunSnapshot,
+        ] = {}
+
+        self._reviews: dict[
+            str,
+            list[CVReviewAuditEntry],
+        ] = {}
+
+    def save_run(
+        self,
+        snapshot: JobAnalysisRunSnapshot,
+    ) -> None:
+        """Create or replace the latest run snapshot."""
+
+        self._runs[snapshot.thread_id] = snapshot.model_copy(deep=True)
+
+    def save_review_result(
+        self,
+        *,
+        snapshot: JobAnalysisRunSnapshot,
+        review: CVReviewAuditEntry,
+    ) -> None:
+        """Persist a run update and one review event."""
+
+        self.save_run(snapshot)
+
+        reviews = self._reviews.setdefault(
+            review.thread_id,
+            [],
+        )
+
+        reviews.append(review.model_copy(deep=True))
+
+    def get_run(
+        self,
+        *,
+        user_id: str,
+        thread_id: str,
+    ) -> JobAnalysisRunSnapshot | None:
+        """Return a user-scoped run."""
+
+        snapshot = self._runs.get(thread_id)
+
+        if snapshot is None or snapshot.user_id != user_id:
+            return None
+
+        return snapshot.model_copy(deep=True)
+
+    def list_reviews(
+        self,
+        *,
+        user_id: str,
+        thread_id: str,
+    ) -> list[CVReviewAuditEntry]:
+        """Return ordered user-scoped review history."""
+
+        snapshot = self._runs.get(thread_id)
+
+        if snapshot is None or snapshot.user_id != user_id:
+            return []
+
+        reviews = self._reviews.get(
+            thread_id,
+            [],
+        )
+
+        return [
+            review.model_copy(deep=True)
+            for review in sorted(
+                reviews,
+                key=lambda item: item.sequence_number,
+            )
+        ]
 
 
 class FakeRequirementExtractor:
@@ -307,7 +394,9 @@ def build_repository() -> InMemoryEvidenceRepository:
     )
 
 
-def build_test_service() -> JobAnalysisService:
+def build_test_service(
+    audit_repository: (InMemoryJobAnalysisAuditRepository),
+) -> JobAnalysisService:
     """Create one durable service for the whole API test."""
 
     repository = build_repository()
@@ -326,14 +415,24 @@ def build_test_service() -> JobAnalysisService:
             )
         ),
         checkpointer_factory=SharedCheckpointerFactory(),
+        audit_repository=audit_repository,
     )
 
 
 @pytest.fixture
-def client() -> Iterator[TestClient]:
+def audit_repository() -> InMemoryJobAnalysisAuditRepository:
+    """Provide isolated business audit storage."""
+
+    return InMemoryJobAnalysisAuditRepository()
+
+
+@pytest.fixture
+def client(
+    audit_repository: (InMemoryJobAnalysisAuditRepository),
+) -> Iterator[TestClient]:
     """Provide a client whose checkpoints survive requests."""
 
-    service = build_test_service()
+    service = build_test_service(audit_repository)
 
     def override_service() -> JobAnalysisService:
         return service
@@ -374,6 +473,49 @@ def start_reviewable_analysis(
     assert body["status"] == "awaiting_review"
 
     return body
+
+
+def test_initial_review_pause_is_persisted(
+    client: TestClient,
+    audit_repository: (InMemoryJobAnalysisAuditRepository),
+) -> None:
+    """Starting analysis should persist its business snapshot."""
+
+    paused = start_reviewable_analysis(
+        client,
+        job_id="JOB-API-AUDIT-INITIAL",
+    )
+
+    thread_id = paused["thread_id"]
+
+    stored = audit_repository.get_run(
+        user_id="USER-API-001",
+        thread_id=thread_id,
+    )
+
+    assert stored is not None
+    assert stored.thread_id == thread_id
+    assert stored.job_id == "JOB-API-AUDIT-INITIAL"
+    assert stored.status.value == "awaiting_review"
+    assert len(stored.cv_proposals) == 1
+    assert len(stored.claim_verification_reports) == 1
+
+    # Business history must enforce the same user boundary.
+    assert (
+        audit_repository.get_run(
+            user_id="USER-OTHER",
+            thread_id=thread_id,
+        )
+        is None
+    )
+
+    assert (
+        audit_repository.list_reviews(
+            user_id="USER-API-001",
+            thread_id=thread_id,
+        )
+        == []
+    )
 
 
 def test_job_analysis_pauses_then_approves(
@@ -700,6 +842,7 @@ def test_unsafe_human_edit_is_blocked_then_corrected(
 
 def test_regeneration_returns_to_human_review_before_approval(
     client: TestClient,
+    audit_repository: (InMemoryJobAnalysisAuditRepository),
 ) -> None:
     """A regenerated proposal must receive another human decision."""
 
@@ -743,6 +886,25 @@ def test_regeneration_returns_to_human_review_before_approval(
     assert regenerated["reviewable_proposal_ids"] == [proposal_id]
     assert regenerated["blocked_proposal_ids"] == []
 
+    first_snapshot = audit_repository.get_run(
+        user_id="USER-API-001",
+        thread_id=thread_id,
+    )
+
+    assert first_snapshot is not None
+    assert first_snapshot.status.value == "awaiting_review"
+
+    first_reviews = audit_repository.list_reviews(
+        user_id="USER-API-001",
+        thread_id=thread_id,
+    )
+
+    assert len(first_reviews) == 1
+
+    assert first_reviews[0].sequence_number == 1
+    assert first_reviews[0].decision.action.value == "regenerate"
+    assert first_reviews[0].result_status.value == "awaiting_review"
+
     assert regenerated["review"]["allowed_actions"] == [
         "approve",
         "edit",
@@ -775,3 +937,30 @@ def test_regeneration_returns_to_human_review_before_approval(
         completed["final_cv_proposals"][0]["proposed_text"]
         == "Built a concise Python API using FastAPI."
     )
+
+    final_snapshot = audit_repository.get_run(
+        user_id="USER-API-001",
+        thread_id=thread_id,
+    )
+
+    assert final_snapshot is not None
+    assert final_snapshot.status.value == "completed"
+    assert final_snapshot.review_status is not None
+    assert final_snapshot.review_status.value == "approved"
+
+    reviews = audit_repository.list_reviews(
+        user_id="USER-API-001",
+        thread_id=thread_id,
+    )
+
+    assert [review.sequence_number for review in reviews] == [1, 2]
+
+    assert [review.decision.action.value for review in reviews] == [
+        "regenerate",
+        "approve",
+    ]
+
+    assert [review.result_status.value for review in reviews] == [
+        "awaiting_review",
+        "completed",
+    ]

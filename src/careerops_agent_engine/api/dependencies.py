@@ -10,6 +10,9 @@ from sqlalchemy.orm import Session, sessionmaker
 from careerops_agent_engine.application.ports.evidence_repository import (
     EvidenceRepository,
 )
+from careerops_agent_engine.application.ports.job_analysis_audit_repository import (
+    JobAnalysisAuditRepository,
+)
 from careerops_agent_engine.application.services.cv_claim_verification import (
     CVClaimVerificationService,
 )
@@ -31,6 +34,9 @@ from careerops_agent_engine.infrastructure.llm.factory import (
     create_cv_proposal_generator,
     create_evidence_discovery_runner,
     create_requirement_extractor,
+)
+from careerops_agent_engine.infrastructure.repositories import (
+    sqlalchemy_job_analysis_audit,
 )
 from careerops_agent_engine.infrastructure.repositories.sqlalchemy_evidence import (
     SqlAlchemyEvidenceRepository,
@@ -76,6 +82,15 @@ def get_evidence_repository() -> EvidenceRepository:
 
 
 @lru_cache
+def get_job_analysis_audit_repository() -> JobAnalysisAuditRepository:
+    """Create the PostgreSQL job-analysis audit repository."""
+
+    return sqlalchemy_job_analysis_audit.SqlAlchemyJobAnalysisAuditRepository(
+        get_database_session_factory()
+    )
+
+
+@lru_cache
 def get_job_analysis_service() -> JobAnalysisService:
     """Create one reusable job-analysis service per process."""
 
@@ -97,4 +112,5 @@ def get_job_analysis_service() -> JobAnalysisService:
         cv_proposal_service=cv_proposal_service,
         cv_claim_verification_service=(cv_claim_verification_service),
         checkpointer_factory=open_postgres_checkpointer,
+        audit_repository=get_job_analysis_audit_repository(),
     )

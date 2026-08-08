@@ -1,6 +1,7 @@
 """Alembic migration environment for CareerOps."""
 
 from logging.config import fileConfig
+from typing import Any
 
 from alembic import context
 from sqlalchemy import engine_from_config, pool
@@ -24,6 +25,30 @@ config.set_main_option(
 target_metadata = Base.metadata
 
 
+# LangGraph owns and migrates these tables itself.
+# They are intentionally outside CareerOps SQLAlchemy/Alembic metadata.
+LANGGRAPH_MANAGED_TABLES = {
+    "checkpoint_migrations",
+    "checkpoints",
+    "checkpoint_blobs",
+    "checkpoint_writes",
+}
+
+
+def include_object(
+    object_: Any,
+    name: str | None,
+    type_: str,
+    reflected: bool,
+    compare_to: Any,
+) -> bool:
+    """Exclude externally managed LangGraph tables from Alembic."""
+
+    del object_, compare_to
+
+    return not (type_ == "table" and reflected and name in LANGGRAPH_MANAGED_TABLES)
+
+
 def run_migrations_offline() -> None:
     """Run migrations without creating a database connection."""
 
@@ -38,6 +63,7 @@ def run_migrations_offline() -> None:
         },
         compare_type=True,
         compare_server_default=True,
+        include_object=include_object,
     )
 
     with context.begin_transaction():
@@ -62,6 +88,7 @@ def run_migrations_online() -> None:
             target_metadata=target_metadata,
             compare_type=True,
             compare_server_default=True,
+            include_object=include_object,
         )
 
         with context.begin_transaction():

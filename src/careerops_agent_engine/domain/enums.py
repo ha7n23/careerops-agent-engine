@@ -79,3 +79,11 @@ class ApprovalStatus(StrEnum):
     EDITED = "edited"
     REJECTED = "rejected"
     REGENERATION_REQUESTED = "regeneration_requested"
+
+
+class JobAnalysisRunStatus(StrEnum):
+    """Business lifecycle status of a job-analysis run."""
+
+    AWAITING_REVIEW = "awaiting_review"
+    COMPLETED = "completed"
+    INVALID = "invalid"

@@ -3,6 +3,7 @@
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
+from hashlib import sha256
 from typing import Any, cast
 from uuid import uuid4
 
@@ -23,6 +24,9 @@ from careerops_agent_engine.application.exceptions import (
 from careerops_agent_engine.application.ports.evidence_discovery import (
     EvidenceDiscoveryRunner,
 )
+from careerops_agent_engine.application.ports.job_analysis_audit_repository import (
+    JobAnalysisAuditRepository,
+)
 from careerops_agent_engine.application.ports.requirement_extractor import (
     RequirementExtractor,
 )
@@ -32,8 +36,22 @@ from careerops_agent_engine.application.services.cv_claim_verification import (
 from careerops_agent_engine.application.services.cv_proposals import (
     CVProposalGenerationService,
 )
+from careerops_agent_engine.domain.enums import (
+    ApprovalStatus,
+    JobAnalysisRunStatus,
+)
 from careerops_agent_engine.domain.models.approval import (
     CVReviewDecision,
+)
+from careerops_agent_engine.domain.models.audit import (
+    CVReviewAuditEntry,
+    JobAnalysisRunSnapshot,
+)
+from careerops_agent_engine.domain.models.cv import (
+    CVChangeProposal,
+)
+from careerops_agent_engine.domain.models.verification import (
+    CVClaimVerificationReport,
 )
 
 CheckpointerFactory = Callable[
@@ -58,7 +76,7 @@ class JobAnalysisExecutionResult:
 
 
 class JobAnalysisService:
-    """Run and resume the CareerOps job-analysis workflow."""
+    """Run, resume, and persist the CareerOps job-analysis workflow."""
 
     def __init__(
         self,
@@ -66,16 +84,18 @@ class JobAnalysisService:
         requirement_extractor: RequirementExtractor,
         evidence_discovery_runner: EvidenceDiscoveryRunner,
         cv_proposal_service: CVProposalGenerationService,
-        cv_claim_verification_service: (CVClaimVerificationService),
+        cv_claim_verification_service: CVClaimVerificationService,
         checkpointer_factory: CheckpointerFactory,
+        audit_repository: JobAnalysisAuditRepository,
     ) -> None:
-        """Store workflow dependencies."""
+        """Store workflow and business-persistence dependencies."""
 
         self._requirement_extractor = requirement_extractor
         self._evidence_discovery_runner = evidence_discovery_runner
         self._cv_proposal_service = cv_proposal_service
         self._cv_claim_verification_service = cv_claim_verification_service
         self._checkpointer_factory = checkpointer_factory
+        self._audit_repository = audit_repository
 
     def analyse(
         self,
@@ -84,7 +104,7 @@ class JobAnalysisService:
         user_id: str,
         job_description: str,
     ) -> JobAnalysisExecutionResult:
-        """Start one new durable job-analysis thread."""
+        """Start and persist one new durable job-analysis thread."""
 
         thread_id = build_thread_id()
 
@@ -112,10 +132,14 @@ class JobAnalysisService:
                 ),
             )
 
-        return build_execution_result(
+        execution = build_execution_result(
             thread_id=thread_id,
             raw_result=raw_result,
         )
+
+        self._audit_repository.save_run(build_run_snapshot(execution))
+
+        return execution
 
     def resume_review(
         self,
@@ -124,7 +148,7 @@ class JobAnalysisService:
         user_id: str,
         decision: CVReviewDecision,
     ) -> JobAnalysisExecutionResult:
-        """Resume a graph paused for authenticated human review."""
+        """Resume and persist an authenticated human review."""
 
         config: RunnableConfig = {
             "configurable": {
@@ -170,10 +194,33 @@ class JobAnalysisService:
                 ),
             )
 
-        return build_execution_result(
+        execution = build_execution_result(
             thread_id=thread_id,
             raw_result=raw_result,
         )
+
+        run_snapshot = build_run_snapshot(execution)
+
+        existing_reviews = self._audit_repository.list_reviews(
+            user_id=user_id,
+            thread_id=thread_id,
+        )
+
+        sequence_number = next_review_sequence(existing_reviews)
+
+        review = build_review_audit_entry(
+            thread_id=thread_id,
+            sequence_number=sequence_number,
+            decision=decision,
+            snapshot=run_snapshot,
+        )
+
+        self._audit_repository.save_review_result(
+            snapshot=run_snapshot,
+            review=review,
+        )
+
+        return execution
 
     def _build_graph(
         self,
@@ -201,6 +248,29 @@ def build_thread_id() -> str:
     return f"THR-{uuid4().hex.upper()}"
 
 
+def build_review_id(
+    *,
+    thread_id: str,
+    sequence_number: int,
+) -> str:
+    """Build a stable identifier for one review position."""
+
+    digest = sha256(f"{thread_id}:{sequence_number}".encode()).hexdigest()[:16].upper()
+
+    return f"REV-{digest}"
+
+
+def next_review_sequence(
+    reviews: list[CVReviewAuditEntry],
+) -> int:
+    """Return the next review sequence for one workflow thread."""
+
+    if not reviews:
+        return 1
+
+    return max(review.sequence_number for review in reviews) + 1
+
+
 def build_execution_result(
     *,
     thread_id: str,
@@ -215,7 +285,10 @@ def build_execution_result(
     if interrupts:
         interrupt_value = interrupts[0].value
 
-        if not isinstance(interrupt_value, dict):
+        if not isinstance(
+            interrupt_value,
+            dict,
+        ):
             raise RuntimeError("CareerOps received an invalid interrupt payload.")
 
         interrupt_payload = cast(
@@ -232,4 +305,117 @@ def build_execution_result(
         thread_id=thread_id,
         state=state,
         interrupt_payload=interrupt_payload,
+    )
+
+
+def build_run_snapshot(
+    execution: JobAnalysisExecutionResult,
+) -> JobAnalysisRunSnapshot:
+    """Convert workflow execution into its latest business snapshot."""
+
+    state = execution.state
+
+    status = resolve_run_status(execution)
+
+    review_status: ApprovalStatus | None = None
+
+    if status is JobAnalysisRunStatus.COMPLETED:
+        review_status_value = state.get("review_status")
+
+        if review_status_value is not None:
+            review_status = ApprovalStatus(review_status_value)
+
+    proposals = [
+        CVChangeProposal.model_validate(payload)
+        for payload in state.get(
+            "cv_proposals",
+            [],
+        )
+    ]
+
+    verification_reports = [
+        CVClaimVerificationReport.model_validate(payload)
+        for payload in state.get(
+            "claim_verification_reports",
+            [],
+        )
+    ]
+
+    final_proposals = [
+        CVChangeProposal.model_validate(payload)
+        for payload in state.get(
+            "final_cv_proposals",
+            [],
+        )
+    ]
+
+    return JobAnalysisRunSnapshot(
+        thread_id=execution.thread_id,
+        user_id=state["user_id"],
+        job_id=state["job_id"],
+        status=status,
+        role_title=state.get("role_title"),
+        fit_score=state.get("fit_score"),
+        review_status=review_status,
+        cv_proposals=proposals,
+        claim_verification_reports=(verification_reports),
+        reviewable_proposal_ids=list(
+            state.get(
+                "reviewable_proposal_ids",
+                [],
+            )
+        ),
+        blocked_proposal_ids=list(
+            state.get(
+                "blocked_proposal_ids",
+                [],
+            )
+        ),
+        final_cv_proposals=final_proposals,
+    )
+
+
+def resolve_run_status(
+    execution: JobAnalysisExecutionResult,
+) -> JobAnalysisRunStatus:
+    """Map graph execution state to the business lifecycle."""
+
+    if execution.awaiting_review:
+        return JobAnalysisRunStatus.AWAITING_REVIEW
+
+    state_status = execution.state.get("status")
+
+    if state_status == "completed":
+        return JobAnalysisRunStatus.COMPLETED
+
+    if state_status == "invalid":
+        return JobAnalysisRunStatus.INVALID
+
+    raise RuntimeError(
+        "CareerOps cannot persist a workflow that "
+        "is neither paused, completed, nor invalid."
+    )
+
+
+def build_review_audit_entry(
+    *,
+    thread_id: str,
+    sequence_number: int,
+    decision: CVReviewDecision,
+    snapshot: JobAnalysisRunSnapshot,
+) -> CVReviewAuditEntry:
+    """Build one append-only business review-history event."""
+
+    return CVReviewAuditEntry(
+        review_id=build_review_id(
+            thread_id=thread_id,
+            sequence_number=sequence_number,
+        ),
+        thread_id=thread_id,
+        sequence_number=sequence_number,
+        decision=decision,
+        result_status=snapshot.status,
+        result_review_status=(snapshot.review_status),
+        resulting_cv_proposals=list(snapshot.cv_proposals),
+        resulting_verification_reports=list(snapshot.claim_verification_reports),
     )
