@@ -35,3 +35,7 @@ class DocumentTextUnavailableError(DocumentExtractionError):
 
 class CVEvidenceProposalValidationError(ValueError):
     """CV evidence extraction failed deterministic validation."""
+
+
+class CVEvidenceReviewValidationError(ValueError):
+    """Human CV-evidence review failed deterministic validation."""
