@@ -16,12 +16,16 @@ from careerops_agent_engine.application.ports.job_analysis_audit_repository impo
 from careerops_agent_engine.application.services.cv_claim_verification import (
     CVClaimVerificationService,
 )
+from careerops_agent_engine.application.services.cv_document_upload import (
+    CVDocumentUploadService,
+)
 from careerops_agent_engine.application.services.cv_proposals import (
     CVProposalGenerationService,
 )
 from careerops_agent_engine.application.services.job_analysis import (
     JobAnalysisService,
 )
+from careerops_agent_engine.core.config import get_settings
 from careerops_agent_engine.infrastructure.database.checkpoint import (
     open_postgres_checkpointer,
 )
@@ -40,6 +44,9 @@ from careerops_agent_engine.infrastructure.repositories import (
 )
 from careerops_agent_engine.infrastructure.repositories.sqlalchemy_evidence import (
     SqlAlchemyEvidenceRepository,
+)
+from careerops_agent_engine.infrastructure.storage.local_document_storage import (
+    LocalDocumentStorage,
 )
 
 
@@ -87,6 +94,27 @@ def get_job_analysis_audit_repository() -> JobAnalysisAuditRepository:
 
     return sqlalchemy_job_analysis_audit.SqlAlchemyJobAnalysisAuditRepository(
         get_database_session_factory()
+    )
+
+
+@lru_cache
+def get_document_storage() -> LocalDocumentStorage:
+    """Create the private local document-storage adapter."""
+
+    settings = get_settings()
+
+    return LocalDocumentStorage(settings.document_storage_root)
+
+
+@lru_cache
+def get_cv_document_upload_service() -> CVDocumentUploadService:
+    """Create the validated CV upload service."""
+
+    settings = get_settings()
+
+    return CVDocumentUploadService(
+        storage=get_document_storage(),
+        max_upload_bytes=(settings.document_upload_max_bytes),
     )
 
 

@@ -87,3 +87,18 @@ class JobAnalysisRunStatus(StrEnum):
     AWAITING_REVIEW = "awaiting_review"
     COMPLETED = "completed"
     INVALID = "invalid"
+
+
+class CareerDocumentFormat(StrEnum):
+    """Supported native career-document formats."""
+
+    PDF = "pdf"
+    DOCX = "docx"
+
+
+class CareerDocumentStatus(StrEnum):
+    """Lifecycle status of an uploaded career document."""
+
+    UPLOADED = "uploaded"
+    EXTRACTED = "extracted"
+    QUARANTINED = "quarantined"

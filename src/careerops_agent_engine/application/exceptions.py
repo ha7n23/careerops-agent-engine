@@ -19,3 +19,7 @@ class CVReviewValidationError(ValueError):
 
 class JobAnalysisThreadUnavailableError(ValueError):
     """A durable review thread cannot be accessed or resumed."""
+
+
+class DocumentUploadValidationError(ValueError):
+    """Uploaded career document failed deterministic validation."""

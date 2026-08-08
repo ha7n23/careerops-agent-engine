@@ -1,6 +1,7 @@
 """Application configuration loaded from environment variables."""
 
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -63,6 +64,14 @@ class Settings(BaseSettings):
         ge=0,
         le=50,
     )
+
+    document_upload_max_bytes: int = Field(
+        default=10 * 1024 * 1024,
+        ge=1024,
+        le=25 * 1024 * 1024,
+    )
+
+    document_storage_root: Path = Path(".careerops_data/documents")
 
 
 @lru_cache
