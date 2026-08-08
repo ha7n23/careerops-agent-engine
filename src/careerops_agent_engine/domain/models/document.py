@@ -5,6 +5,7 @@ from pydantic import Field
 from careerops_agent_engine.domain.enums import (
     CareerDocumentFormat,
     CareerDocumentStatus,
+    CVSection,
 )
 from careerops_agent_engine.domain.models.base import DomainModel
 
@@ -66,5 +67,39 @@ class ExtractedDocumentText(DomainModel):
         default=None,
         ge=0,
     )
+
+    warnings: list[str] = Field(default_factory=list)
+
+
+class ParsedCVSection(DomainModel):
+    """One deterministically identified section of an uploaded CV."""
+
+    section: CVSection
+
+    heading: str = Field(
+        min_length=1,
+        max_length=120,
+    )
+
+    text: str = Field(
+        min_length=1,
+    )
+
+    order_index: int = Field(
+        ge=0,
+    )
+
+
+class ParsedCVDocument(DomainModel):
+    """Structured section view of extracted CV text."""
+
+    document_id: str = Field(
+        min_length=1,
+        max_length=64,
+    )
+
+    preamble_text: str | None = None
+
+    sections: list[ParsedCVSection] = Field(default_factory=list)
 
     warnings: list[str] = Field(default_factory=list)
