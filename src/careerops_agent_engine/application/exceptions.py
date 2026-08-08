@@ -31,3 +31,7 @@ class DocumentExtractionError(ValueError):
 
 class DocumentTextUnavailableError(DocumentExtractionError):
     """Document contains no usable native text."""
+
+
+class CVEvidenceProposalValidationError(ValueError):
+    """CV evidence extraction failed deterministic validation."""

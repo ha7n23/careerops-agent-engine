@@ -93,3 +93,23 @@ class GeneratedClaimVerification(DomainModel):
     coverage_complete: bool
 
     coverage_notes: list[str] = Field(default_factory=list)
+
+
+class ExtractedCareerEvidenceCandidate(DomainModel):
+    """One provider-extracted CV evidence candidate."""
+
+    category: EvidenceCategory
+    title: str
+    source_section_order_index: int
+    source_excerpt: str
+
+    technologies: list[str]
+    capabilities: list[str]
+    claims: list[str]
+    warnings: list[str]
+
+
+class ExtractedCareerEvidenceSet(DomainModel):
+    """Structured evidence candidates returned by the provider."""
+
+    candidates: list[ExtractedCareerEvidenceCandidate]

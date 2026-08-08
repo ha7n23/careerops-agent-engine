@@ -1,0 +1,109 @@
+"""Gemini implementation of structured CV evidence extraction."""
+
+import json
+from typing import Any
+
+from langchain_google_genai import (
+    ChatGoogleGenerativeAI,
+)
+
+from careerops_agent_engine.agents.prompts.cv_evidence_extraction import (
+    CV_EVIDENCE_EXTRACTION_PROMPT,
+    PROMPT_VERSION,
+)
+from careerops_agent_engine.domain.models.document import (
+    ParsedCVDocument,
+)
+from careerops_agent_engine.domain.models.evidence import (
+    CareerEvidenceCandidate,
+)
+from careerops_agent_engine.infrastructure.llm.schemas import (
+    ExtractedCareerEvidenceSet,
+)
+
+
+class GoogleCVEvidenceExtractor:
+    """Extract pending evidence candidates using Gemini."""
+
+    def __init__(
+        self,
+        *,
+        model_name: str,
+        temperature: float,
+        timeout_seconds: float,
+        max_retries: int,
+    ) -> None:
+        """Initialise Gemini structured output."""
+
+        model = ChatGoogleGenerativeAI(
+            model=model_name,
+            temperature=temperature,
+            timeout=timeout_seconds,
+            max_retries=max_retries,
+            thinking_level="minimal",
+        )
+
+        self._structured_model = model.with_structured_output(
+            schema=(ExtractedCareerEvidenceSet.model_json_schema()),
+            method="json_schema",
+        )
+
+        self._model_name = model_name
+
+    def extract(
+        self,
+        *,
+        document: ParsedCVDocument,
+    ) -> list[CareerEvidenceCandidate]:
+        """Extract candidate evidence from recognised CV sections."""
+
+        section_context = [
+            {
+                "section": section.section.value,
+                "heading": section.heading,
+                "order_index": section.order_index,
+                "text": section.text,
+            }
+            for section in document.sections
+        ]
+
+        messages = CV_EVIDENCE_EXTRACTION_PROMPT.format_messages(
+            parsed_cv_sections=json.dumps(
+                section_context,
+                indent=2,
+            )
+        )
+
+        raw_result: Any = self._structured_model.invoke(
+            messages,
+            config={
+                "run_name": ("extract_cv_evidence_candidates"),
+                "tags": [
+                    "careerops",
+                    "cv-ingestion",
+                    "evidence-extraction",
+                    "structured-output",
+                ],
+                "metadata": {
+                    "document_id": (document.document_id),
+                    "prompt_version": (PROMPT_VERSION),
+                    "model_name": (self._model_name),
+                },
+            },
+        )
+
+        extracted = ExtractedCareerEvidenceSet.model_validate(raw_result)
+
+        return [
+            CareerEvidenceCandidate(
+                category=candidate.category,
+                title=candidate.title,
+                source_section_order_index=(candidate.source_section_order_index),
+                source_excerpt=(candidate.source_excerpt),
+                technologies=list(candidate.technologies),
+                capabilities=list(candidate.capabilities),
+                claims=list(candidate.claims),
+                warnings=list(candidate.warnings),
+            )
+            for candidate in extracted.candidates
+        ]
