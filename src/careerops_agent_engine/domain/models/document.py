@@ -43,3 +43,28 @@ class CareerDocument(DomainModel):
     )
 
     status: CareerDocumentStatus
+
+
+class ExtractedDocumentText(DomainModel):
+    """Native text extracted from one validated career document."""
+
+    document_id: str = Field(
+        min_length=1,
+        max_length=64,
+    )
+
+    text: str = Field(
+        min_length=1,
+    )
+
+    page_count: int | None = Field(
+        default=None,
+        ge=1,
+    )
+
+    paragraph_count: int | None = Field(
+        default=None,
+        ge=0,
+    )
+
+    warnings: list[str] = Field(default_factory=list)

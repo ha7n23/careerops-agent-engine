@@ -23,3 +23,11 @@ class JobAnalysisThreadUnavailableError(ValueError):
 
 class DocumentUploadValidationError(ValueError):
     """Uploaded career document failed deterministic validation."""
+
+
+class DocumentExtractionError(ValueError):
+    """Validated document could not be extracted safely."""
+
+
+class DocumentTextUnavailableError(DocumentExtractionError):
+    """Document contains no usable native text."""
