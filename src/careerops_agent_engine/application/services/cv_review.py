@@ -87,4 +87,20 @@ def validate_review_decision(
 
         return
 
-    raise CVReviewValidationError("Regeneration is not enabled at this workflow stage.")
+    if decision.action is ReviewAction.REGENERATE:
+        if approved_ids or edited_ids:
+            raise CVReviewValidationError(
+                "A regeneration decision cannot approve or edit proposals."
+            )
+
+        if rejected_ids != expected_ids:
+            raise CVReviewValidationError(
+                "A regeneration decision must target every proposal under review."
+            )
+
+        if not decision.reviewer_comment:
+            raise CVReviewValidationError("Regeneration requires reviewer feedback.")
+
+        return
+
+    raise CVReviewValidationError("Unsupported human-review action.")

@@ -172,6 +172,42 @@ class FakeCVProposalGenerator:
             warnings=[],
         )
 
+    def regenerate(
+        self,
+        *,
+        proposal_id: str,
+        job_id: str,
+        requirement: JobRequirement,
+        evidence_match: EvidenceMatch,
+        approved_evidence: Sequence[CareerEvidence],
+        previous_proposal: CVChangeProposal,
+        reviewer_feedback: str,
+    ) -> CVChangeProposal:
+        """Return controlled regenerated API-test wording."""
+
+        del (
+            job_id,
+            evidence_match,
+            previous_proposal,
+        )
+
+        if "kubernetes" in reviewer_feedback.casefold():
+            proposed_text = "Built a Kubernetes-based Python FastAPI application."
+        else:
+            proposed_text = "Built a concise Python API using FastAPI."
+
+        return CVChangeProposal(
+            proposal_id=proposal_id,
+            section=CVSection.PROJECTS,
+            proposed_text=proposed_text,
+            requirement_ids=[requirement.requirement_id],
+            supporting_evidence_ids=[
+                evidence.evidence_id for evidence in approved_evidence
+            ],
+            confidence_score=0.95,
+            warnings=[],
+        )
+
 
 class FakeClaimVerifier:
     """Verify grounded text and reject an invented latency metric."""
@@ -198,6 +234,27 @@ class FakeClaimVerifier:
                         supporting_evidence_ids=[],
                         explanation=(
                             "No approved evidence supports this latency metric."
+                        ),
+                    )
+                ],
+                coverage_complete=True,
+                coverage_notes=[],
+                fully_supported=False,
+                unsupported_claims=[unsupported_claim],
+            )
+
+        if "kubernetes" in lowered_text:
+            unsupported_claim = "Built a Kubernetes-based Python FastAPI application."
+
+            return CVClaimVerificationReport(
+                proposal_id=proposal.proposal_id,
+                claims=[
+                    ClaimAssessment(
+                        claim_text=unsupported_claim,
+                        supported=False,
+                        supporting_evidence_ids=[],
+                        explanation=(
+                            "Approved evidence does not support Kubernetes experience."
                         ),
                     )
                 ],
@@ -348,6 +405,7 @@ def test_job_analysis_pauses_then_approves(
     assert paused["review"]["allowed_actions"] == [
         "approve",
         "edit",
+        "regenerate",
         "reject",
     ]
 
@@ -596,6 +654,7 @@ def test_unsafe_human_edit_is_blocked_then_corrected(
 
     assert rework["review"]["allowed_actions"] == [
         "edit",
+        "regenerate",
         "reject",
     ]
 
@@ -636,4 +695,83 @@ def test_unsafe_human_edit_is_blocked_then_corrected(
     assert (
         completed["final_cv_proposals"][0]["proposed_text"]
         == "Built a Python application using FastAPI."
+    )
+
+
+def test_regeneration_returns_to_human_review_before_approval(
+    client: TestClient,
+) -> None:
+    """A regenerated proposal must receive another human decision."""
+
+    paused = start_reviewable_analysis(
+        client,
+        job_id="JOB-API-REGENERATE",
+    )
+
+    thread_id = paused["thread_id"]
+    proposal_id = paused["cv_proposals"][0]["proposal_id"]
+
+    regenerate_response = client.post(
+        f"/api/v1/job-analysis/{thread_id}/review",
+        headers={
+            "X-User-ID": "USER-API-001",
+        },
+        json={
+            "action": "regenerate",
+            "approved_proposal_ids": [],
+            "rejected_proposal_ids": [proposal_id],
+            "edits": [],
+            "reviewer_comment": ("Make the wording more concise."),
+        },
+    )
+
+    assert regenerate_response.status_code == 200
+
+    regenerated = regenerate_response.json()
+
+    assert regenerated["status"] == "awaiting_review"
+    assert regenerated["thread_id"] == thread_id
+
+    assert regenerated["cv_proposals"][0]["proposal_id"] == proposal_id
+
+    assert (
+        regenerated["cv_proposals"][0]["proposed_text"]
+        == "Built a concise Python API using FastAPI."
+    )
+
+    # Passing verification is still not approval.
+    assert regenerated["reviewable_proposal_ids"] == [proposal_id]
+    assert regenerated["blocked_proposal_ids"] == []
+
+    assert regenerated["review"]["allowed_actions"] == [
+        "approve",
+        "edit",
+        "regenerate",
+        "reject",
+    ]
+
+    approve_response = client.post(
+        f"/api/v1/job-analysis/{thread_id}/review",
+        headers={
+            "X-User-ID": "USER-API-001",
+        },
+        json={
+            "action": "approve",
+            "approved_proposal_ids": [proposal_id],
+            "rejected_proposal_ids": [],
+            "edits": [],
+            "reviewer_comment": ("Approved regenerated wording."),
+        },
+    )
+
+    assert approve_response.status_code == 200
+
+    completed = approve_response.json()
+
+    assert completed["status"] == "completed"
+    assert completed["review_status"] == "approved"
+
+    assert (
+        completed["final_cv_proposals"][0]["proposed_text"]
+        == "Built a concise Python API using FastAPI."
     )

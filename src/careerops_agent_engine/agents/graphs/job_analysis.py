@@ -14,8 +14,10 @@ from careerops_agent_engine.agents.nodes.job_analysis import (
     create_discover_evidence_node,
     create_extract_requirements_node,
     create_generate_cv_proposals_node,
+    create_regenerate_cv_proposals_node,
     create_reverify_human_edits_node,
     create_verify_cv_proposals_node,
+    create_verify_regenerated_proposals_node,
     finalize_human_review,
     mark_invalid,
     request_edit_rework,
@@ -67,7 +69,11 @@ def route_after_proposal_verification(
 
 def route_after_human_review(
     state: JobAnalysisState,
-) -> Literal["edit", "finalize"]:
+) -> Literal[
+    "edit",
+    "regenerate",
+    "finalize",
+]:
     """Route the current human decision."""
 
     decision_payload = state.get("review_decision")
@@ -79,6 +85,9 @@ def route_after_human_review(
 
     if decision.action is ReviewAction.EDIT:
         return "edit"
+
+    if decision.action is ReviewAction.REGENERATE:
+        return "regenerate"
 
     return "finalize"
 
@@ -94,12 +103,23 @@ def route_after_edit_verification(
     return "passed"
 
 
+def route_after_regeneration_verification(
+    state: JobAnalysisState,
+) -> Literal["passed", "failed"]:
+    """Determine whether regenerated wording passed verification."""
+
+    if state.get("regeneration_verification_failed_ids"):
+        return "failed"
+
+    return "passed"
+
+
 def build_job_analysis_graph(
     requirement_extractor: RequirementExtractor,
     evidence_discovery_runner: EvidenceDiscoveryRunner,
     cv_proposal_service: CVProposalGenerationService,
-    cv_claim_verification_service: CVClaimVerificationService,
-    checkpointer: BaseCheckpointSaver[str] | None = None,
+    cv_claim_verification_service: (CVClaimVerificationService),
+    checkpointer: (BaseCheckpointSaver[str] | None) = None,
 ) -> CompiledStateGraph[
     JobAnalysisState,
     None,
@@ -126,11 +146,19 @@ def build_job_analysis_graph(
         create_verify_cv_proposals_node(cv_claim_verification_service)
     )
 
+    regenerate_cv_proposals_node = RunnableLambda(
+        create_regenerate_cv_proposals_node(cv_proposal_service)
+    )
+
+    verify_regenerated_proposals_node = RunnableLambda(
+        create_verify_regenerated_proposals_node(cv_claim_verification_service)
+    )
+
     reverify_human_edits_node = RunnableLambda(
         create_reverify_human_edits_node(cv_claim_verification_service)
     )
 
-    # Initial workflow nodes.
+    # Initial analysis.
     builder.add_node(
         "validate_job_input",
         validate_job_input,
@@ -148,7 +176,7 @@ def build_job_analysis_graph(
         calculate_fit,
     )
 
-    # Proposal generation and verification.
+    # Initial CV proposal lifecycle.
     builder.add_node(
         "generate_cv_proposals",
         generate_cv_proposals_node,
@@ -158,11 +186,13 @@ def build_job_analysis_graph(
         verify_cv_proposals_node,
     )
 
-    # Human-in-the-loop nodes.
+    # Human review.
     builder.add_node(
         "request_human_review",
         request_human_review,
     )
+
+    # Human editing.
     builder.add_node(
         "apply_human_edits",
         apply_human_edits,
@@ -171,6 +201,18 @@ def build_job_analysis_graph(
         "reverify_human_edits",
         reverify_human_edits_node,
     )
+
+    # Feedback-aware regeneration.
+    builder.add_node(
+        "regenerate_cv_proposals",
+        regenerate_cv_proposals_node,
+    )
+    builder.add_node(
+        "verify_regenerated_proposals",
+        verify_regenerated_proposals_node,
+    )
+
+    # Rework and finalization.
     builder.add_node(
         "request_edit_rework",
         request_edit_rework,
@@ -190,7 +232,7 @@ def build_job_analysis_graph(
         mark_invalid,
     )
 
-    # Entry point.
+    # Entry.
     builder.add_edge(
         START,
         "validate_job_input",
@@ -223,7 +265,6 @@ def build_job_analysis_graph(
         "verify_cv_proposals",
     )
 
-    # Only fully supported proposals reach human review.
     builder.add_conditional_edges(
         "verify_cv_proposals",
         route_after_proposal_verification,
@@ -233,24 +274,26 @@ def build_job_analysis_graph(
         },
     )
 
-    # Approve/reject finalize directly.
-    # Edits must be applied and reverified.
+    # Human decision:
+    # approve/reject -> finalize
+    # edit -> deterministic human edit path
+    # regenerate -> feedback-aware generation path
     builder.add_conditional_edges(
         "request_human_review",
         route_after_human_review,
         {
             "edit": "apply_human_edits",
+            "regenerate": ("regenerate_cv_proposals"),
             "finalize": "finalize_human_review",
         },
     )
 
+    # Human-edited text must be reverified.
     builder.add_edge(
         "apply_human_edits",
         "reverify_human_edits",
     )
 
-    # Safe edits may finalize.
-    # Unsupported edits return to another human interrupt.
     builder.add_conditional_edges(
         "reverify_human_edits",
         route_after_edit_verification,
@@ -260,12 +303,31 @@ def build_job_analysis_graph(
         },
     )
 
-    # After a failed edit, the reviewer may edit again or reject.
+    # Regenerated text must also be verified.
+    builder.add_edge(
+        "regenerate_cv_proposals",
+        "verify_regenerated_proposals",
+    )
+
+    # IMPORTANT:
+    # successful regeneration returns to human review.
+    # It never auto-approves itself.
+    builder.add_conditional_edges(
+        "verify_regenerated_proposals",
+        route_after_regeneration_verification,
+        {
+            "passed": "request_human_review",
+            "failed": "request_edit_rework",
+        },
+    )
+
+    # Rework after an unsafe edit or regeneration.
     builder.add_conditional_edges(
         "request_edit_rework",
         route_after_human_review,
         {
             "edit": "apply_human_edits",
+            "regenerate": ("regenerate_cv_proposals"),
             "finalize": "finalize_human_review",
         },
     )

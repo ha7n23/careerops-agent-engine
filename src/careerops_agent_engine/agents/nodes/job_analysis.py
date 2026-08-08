@@ -328,6 +328,7 @@ def request_human_review(
             "allowed_actions": [
                 ReviewAction.APPROVE.value,
                 ReviewAction.EDIT.value,
+                ReviewAction.REGENERATE.value,
                 ReviewAction.REJECT.value,
             ],
         }
@@ -341,6 +342,7 @@ def request_human_review(
         allowed_actions={
             ReviewAction.APPROVE,
             ReviewAction.EDIT,
+            ReviewAction.REGENERATE,
             ReviewAction.REJECT,
         },
     )
@@ -411,6 +413,8 @@ def apply_human_edits(
             proposal.model_dump(mode="json") for proposal in updated_proposals
         ],
         "edited_proposal_ids": sorted(edits_by_id),
+        "regenerated_proposal_ids": [],
+        "regeneration_verification_failed_ids": [],
         "audit_events": [
             {
                 "node": "apply_human_edits",
@@ -418,6 +422,263 @@ def apply_human_edits(
             }
         ],
     }
+
+
+def create_regenerate_cv_proposals_node(
+    proposal_service: CVProposalGenerationService,
+) -> Callable[[JobAnalysisState], JobAnalysisUpdate]:
+    """Create a node that regenerates proposals from reviewer feedback."""
+
+    def regenerate_cv_proposals(
+        state: JobAnalysisState,
+    ) -> JobAnalysisUpdate:
+        decision_payload = state.get("review_decision")
+
+        if decision_payload is None:
+            raise ValueError("Proposal regeneration requires a human review decision.")
+
+        decision = CVReviewDecision.model_validate(decision_payload)
+
+        if decision.action is not ReviewAction.REGENERATE:
+            raise ValueError("Proposal regeneration requires a regenerate decision.")
+
+        target_ids = state.get(
+            "review_target_proposal_ids",
+            [],
+        )
+
+        validate_review_decision(
+            decision=decision,
+            reviewable_proposal_ids=target_ids,
+            allowed_actions={
+                ReviewAction.REGENERATE,
+            },
+        )
+
+        reviewer_feedback = (decision.reviewer_comment or "").strip()
+
+        if not reviewer_feedback:
+            raise ValueError("Proposal regeneration requires reviewer feedback.")
+
+        requirements = [
+            JobRequirement.model_validate(payload)
+            for payload in state.get(
+                "requirements",
+                [],
+            )
+        ]
+
+        evidence_matches = [
+            EvidenceMatch.model_validate(payload)
+            for payload in state.get(
+                "evidence_matches",
+                [],
+            )
+        ]
+
+        proposals = [
+            CVChangeProposal.model_validate(payload)
+            for payload in state.get(
+                "cv_proposals",
+                [],
+            )
+        ]
+
+        requirements_by_id = {
+            requirement.requirement_id: requirement for requirement in requirements
+        }
+
+        matches_by_requirement = {
+            match.requirement_id: match for match in evidence_matches
+        }
+
+        target_id_set = set(target_ids)
+
+        updated_proposals: list[CVChangeProposal] = []
+
+        regenerated_ids: list[str] = []
+
+        for proposal in proposals:
+            if proposal.proposal_id not in target_id_set:
+                updated_proposals.append(proposal)
+                continue
+
+            if len(proposal.requirement_ids) != 1:
+                raise ValueError(
+                    "Regeneration requires exactly one requirement per proposal."
+                )
+
+            requirement_id = proposal.requirement_ids[0]
+
+            requirement = requirements_by_id.get(requirement_id)
+
+            if requirement is None:
+                raise ValueError(
+                    "Regeneration requirement is "
+                    "missing from workflow state: "
+                    f"{requirement_id}"
+                )
+
+            evidence_match = matches_by_requirement.get(requirement_id)
+
+            if evidence_match is None:
+                raise ValueError(
+                    "Regeneration evidence match is "
+                    "missing from workflow state: "
+                    f"{requirement_id}"
+                )
+
+            regenerated = proposal_service.regenerate_for_requirement(
+                job_id=state["job_id"],
+                user_id=state["user_id"],
+                requirement=requirement,
+                evidence_match=evidence_match,
+                previous_proposal=proposal,
+                reviewer_feedback=(reviewer_feedback),
+            )
+
+            updated_proposals.append(regenerated)
+            regenerated_ids.append(regenerated.proposal_id)
+
+        if set(regenerated_ids) != target_id_set:
+            missing_ids = sorted(target_id_set - set(regenerated_ids))
+
+            raise ValueError(
+                "Regeneration targets were missing "
+                "from workflow proposals: "
+                f"{', '.join(missing_ids)}"
+            )
+
+        return {
+            "cv_proposals": [
+                proposal.model_dump(mode="json") for proposal in updated_proposals
+            ],
+            "regenerated_proposal_ids": sorted(regenerated_ids),
+            "regeneration_verification_failed_ids": [],
+            "regeneration_feedback": (reviewer_feedback),
+            "edited_proposal_ids": [],
+            "edit_verification_failed_ids": [],
+            "audit_events": [
+                {
+                    "node": ("regenerate_cv_proposals"),
+                    "event": ("cv_proposals_regenerated"),
+                }
+            ],
+        }
+
+    return regenerate_cv_proposals
+
+
+def create_verify_regenerated_proposals_node(
+    verification_service: CVClaimVerificationService,
+) -> Callable[[JobAnalysisState], JobAnalysisUpdate]:
+    """Verify regenerated proposals before another human review."""
+
+    def verify_regenerated_proposals(
+        state: JobAnalysisState,
+    ) -> JobAnalysisUpdate:
+        regenerated_ids = set(
+            state.get(
+                "regenerated_proposal_ids",
+                [],
+            )
+        )
+
+        if not regenerated_ids:
+            raise ValueError(
+                "Regeneration verification requires at least one regenerated proposal."
+            )
+
+        proposals = [
+            CVChangeProposal.model_validate(payload)
+            for payload in state.get(
+                "cv_proposals",
+                [],
+            )
+        ]
+
+        existing_reports = [
+            CVClaimVerificationReport.model_validate(payload)
+            for payload in state.get(
+                "claim_verification_reports",
+                [],
+            )
+        ]
+
+        proposals_by_id = {proposal.proposal_id: proposal for proposal in proposals}
+
+        reports_by_id = {report.proposal_id: report for report in existing_reports}
+
+        for proposal_id in regenerated_ids:
+            proposal = proposals_by_id.get(proposal_id)
+
+            if proposal is None:
+                raise ValueError(
+                    "Regenerated proposal is missing "
+                    "from workflow state: "
+                    f"{proposal_id}"
+                )
+
+            report = verification_service.verify_proposal(
+                user_id=state["user_id"],
+                proposal=proposal,
+            )
+
+            reports_by_id[proposal_id] = report
+
+        target_ids = set(
+            state.get(
+                "review_target_proposal_ids",
+                [],
+            )
+        )
+
+        failed_ids = sorted(
+            proposal_id
+            for proposal_id in target_ids
+            if (
+                proposal_id not in reports_by_id
+                or not reports_by_id[proposal_id].fully_supported
+            )
+        )
+
+        passed_ids = sorted(target_ids - set(failed_ids))
+
+        existing_non_target_blocked = (
+            set(
+                state.get(
+                    "blocked_proposal_ids",
+                    [],
+                )
+            )
+            - target_ids
+        )
+
+        blocked_ids = sorted(existing_non_target_blocked | set(failed_ids))
+
+        ordered_reports = [
+            reports_by_id[proposal.proposal_id]
+            for proposal in proposals
+            if proposal.proposal_id in reports_by_id
+        ]
+
+        return {
+            "claim_verification_reports": [
+                report.model_dump(mode="json") for report in ordered_reports
+            ],
+            "reviewable_proposal_ids": (passed_ids),
+            "blocked_proposal_ids": (blocked_ids),
+            "regeneration_verification_failed_ids": (failed_ids),
+            "edit_verification_failed_ids": [],
+            "audit_events": [
+                {
+                    "node": ("verify_regenerated_proposals"),
+                    "event": ("regenerated_proposals_verified"),
+                }
+            ],
+        }
+
+    return verify_regenerated_proposals
 
 
 def create_reverify_human_edits_node(
@@ -532,7 +793,7 @@ def create_reverify_human_edits_node(
 def request_edit_rework(
     state: JobAnalysisState,
 ) -> JobAnalysisUpdate:
-    """Pause again when human-edited wording fails verification."""
+    """Pause again when revised wording fails verification."""
 
     target_ids = state.get(
         "review_target_proposal_ids",
@@ -572,6 +833,7 @@ def request_edit_rework(
             ],
             "allowed_actions": [
                 ReviewAction.EDIT.value,
+                ReviewAction.REGENERATE.value,
                 ReviewAction.REJECT.value,
             ],
         }
@@ -584,6 +846,7 @@ def request_edit_rework(
         reviewable_proposal_ids=target_ids,
         allowed_actions={
             ReviewAction.EDIT,
+            ReviewAction.REGENERATE,
             ReviewAction.REJECT,
         },
     )

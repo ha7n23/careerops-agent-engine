@@ -51,11 +51,10 @@ class CVProposalGenerationService:
     ) -> CVChangeProposal | None:
         """Generate one grounded proposal when direct evidence exists."""
 
-        if evidence_match.requirement_id != requirement.requirement_id:
-            raise CVProposalValidationError(
-                "Evidence match requirement identifier does not "
-                "match the requested requirement."
-            )
+        self._validate_requirement_match(
+            requirement=requirement,
+            evidence_match=evidence_match,
+        )
 
         if evidence_match.match_strength not in ELIGIBLE_MATCH_STRENGTHS:
             return None
@@ -86,6 +85,91 @@ class CVProposalGenerationService:
         )
 
         return proposal
+
+    def regenerate_for_requirement(
+        self,
+        *,
+        job_id: str,
+        user_id: str,
+        requirement: JobRequirement,
+        evidence_match: EvidenceMatch,
+        previous_proposal: CVChangeProposal,
+        reviewer_feedback: str,
+    ) -> CVChangeProposal:
+        """Regenerate one proposal from evidence and human feedback."""
+
+        self._validate_requirement_match(
+            requirement=requirement,
+            evidence_match=evidence_match,
+        )
+
+        if evidence_match.match_strength not in ELIGIBLE_MATCH_STRENGTHS:
+            raise CVProposalValidationError(
+                "Regeneration requires direct eligible evidence."
+            )
+
+        feedback = reviewer_feedback.strip()
+
+        if not feedback:
+            raise CVProposalValidationError("Regeneration requires reviewer feedback.")
+
+        direct_evidence = self._load_direct_evidence(
+            user_id=user_id,
+            evidence_match=evidence_match,
+        )
+
+        proposal_id = build_proposal_id(
+            job_id=job_id,
+            requirement_id=requirement.requirement_id,
+        )
+
+        allowed_evidence_ids = {evidence.evidence_id for evidence in direct_evidence}
+
+        validate_cv_proposal(
+            proposal=previous_proposal,
+            expected_proposal_id=proposal_id,
+            requirement=requirement,
+            allowed_evidence_ids=allowed_evidence_ids,
+        )
+
+        regenerated = self._generator.regenerate(
+            proposal_id=proposal_id,
+            job_id=job_id,
+            requirement=requirement,
+            evidence_match=evidence_match,
+            approved_evidence=direct_evidence,
+            previous_proposal=previous_proposal,
+            reviewer_feedback=feedback,
+        )
+
+        validate_cv_proposal(
+            proposal=regenerated,
+            expected_proposal_id=proposal_id,
+            requirement=requirement,
+            allowed_evidence_ids=allowed_evidence_ids,
+        )
+
+        if regenerated.proposed_text == previous_proposal.proposed_text:
+            raise CVProposalValidationError(
+                "Regenerated proposal must meaningfully revise "
+                "the previous proposal text."
+            )
+
+        return regenerated
+
+    def _validate_requirement_match(
+        self,
+        *,
+        requirement: JobRequirement,
+        evidence_match: EvidenceMatch,
+    ) -> None:
+        """Ensure the evidence match belongs to the requirement."""
+
+        if evidence_match.requirement_id != requirement.requirement_id:
+            raise CVProposalValidationError(
+                "Evidence match requirement identifier does not "
+                "match the requested requirement."
+            )
 
     def _load_direct_evidence(
         self,

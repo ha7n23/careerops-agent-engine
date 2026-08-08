@@ -146,6 +146,42 @@ class FakeCVProposalGenerator:
             warnings=[],
         )
 
+    def regenerate(
+        self,
+        *,
+        proposal_id: str,
+        job_id: str,
+        requirement: JobRequirement,
+        evidence_match: EvidenceMatch,
+        approved_evidence: Sequence[CareerEvidence],
+        previous_proposal: CVChangeProposal,
+        reviewer_feedback: str,
+    ) -> CVChangeProposal:
+        """Regenerate wording according to controlled feedback."""
+
+        del (
+            job_id,
+            evidence_match,
+            previous_proposal,
+        )
+
+        if "kubernetes" in reviewer_feedback.casefold():
+            proposed_text = "Built a Kubernetes-based Python FastAPI application."
+        else:
+            proposed_text = "Built a concise Python API using FastAPI."
+
+        return CVChangeProposal(
+            proposal_id=proposal_id,
+            section=CVSection.PROJECTS,
+            proposed_text=proposed_text,
+            requirement_ids=[requirement.requirement_id],
+            supporting_evidence_ids=[
+                evidence.evidence_id for evidence in approved_evidence
+            ],
+            confidence_score=0.95,
+            warnings=[],
+        )
+
 
 class FakeClaimVerifier:
     """Verify safe wording and reject an invented latency metric."""
@@ -176,6 +212,29 @@ class FakeClaimVerifier:
                         supporting_evidence_ids=[],
                         explanation=(
                             "No approved evidence supports this latency metric."
+                        ),
+                    )
+                ],
+                coverage_complete=True,
+                coverage_notes=[],
+                fully_supported=False,
+                unsupported_claims=[unsupported_claim],
+            )
+
+        if "kubernetes" in lowered_text:
+            unsupported_claim = "Built a Kubernetes-based Python FastAPI application."
+
+            return CVClaimVerificationReport(
+                proposal_id=proposal.proposal_id,
+                claims=[
+                    ClaimAssessment(
+                        claim_text=unsupported_claim,
+                        supported=False,
+                        supporting_evidence_ids=[],
+                        explanation=(
+                            "Approved evidence contains "
+                            "Python and FastAPI experience, "
+                            "but no Kubernetes experience."
                         ),
                     )
                 ],
@@ -299,6 +358,7 @@ def test_valid_job_pauses_then_resumes_with_approval() -> None:
     assert payload["allowed_actions"] == [
         "approve",
         "edit",
+        "regenerate",
         "reject",
     ]
 
@@ -531,6 +591,7 @@ def test_unsupported_human_edit_requires_rework() -> None:
     assert payload["type"] == "cv_proposal_review"
     assert payload["allowed_actions"] == [
         "edit",
+        "regenerate",
         "reject",
     ]
 
@@ -572,3 +633,153 @@ def test_unsupported_human_edit_requires_rework() -> None:
     assert events.count("human_edits_reverified") == 2
 
     assert "human_edit_review_received" in events
+
+
+def test_supported_regeneration_requires_human_review_again() -> None:
+    """A safe regeneration must never auto-approve itself."""
+
+    checkpointer = InMemorySaver()
+    graph = build_test_graph(checkpointer)
+
+    config: RunnableConfig = {
+        "configurable": {
+            "thread_id": ("THREAD-GRAPH-REGENERATE-SAFE"),
+        }
+    }
+
+    paused = graph.invoke(
+        {
+            "job_id": "JOB-REGENERATE-SAFE",
+            "user_id": "USER-TEST-001",
+            "job_description": (
+                "Strong Python development experience is required for this role."
+            ),
+            "audit_events": [],
+        },
+        config=config,
+    )
+
+    proposal = CVChangeProposal.model_validate(paused["cv_proposals"][0])
+
+    regenerate_decision = CVReviewDecision(
+        action=ReviewAction.REGENERATE,
+        rejected_proposal_ids=[proposal.proposal_id],
+        reviewer_comment=("Make the wording more concise."),
+    )
+
+    regenerated = graph.invoke(
+        Command(resume=regenerate_decision.model_dump(mode="json")),
+        config=config,
+    )
+
+    # Regeneration passed verification but MUST pause again.
+    assert "__interrupt__" in regenerated
+    assert regenerated.get("status") != "completed"
+
+    assert regenerated["regenerated_proposal_ids"] == [proposal.proposal_id]
+    assert regenerated["regeneration_verification_failed_ids"] == []
+
+    assert regenerated["reviewable_proposal_ids"] == [proposal.proposal_id]
+    assert regenerated["blocked_proposal_ids"] == []
+
+    regenerated_proposal = CVChangeProposal.model_validate(
+        regenerated["cv_proposals"][0]
+    )
+
+    assert regenerated_proposal.proposal_id == proposal.proposal_id
+    assert regenerated_proposal.proposed_text == (
+        "Built a concise Python API using FastAPI."
+    )
+
+    payload = regenerated["__interrupt__"][0].value
+
+    assert payload["allowed_actions"] == [
+        "approve",
+        "edit",
+        "regenerate",
+        "reject",
+    ]
+
+    events = [event["event"] for event in regenerated["audit_events"]]
+
+    assert "cv_proposals_regenerated" in events
+    assert "regenerated_proposals_verified" in events
+    assert "human_review_finalized" not in events
+
+    # Human approval is still required after regeneration.
+    approve_decision = CVReviewDecision(
+        action=ReviewAction.APPROVE,
+        approved_proposal_ids=[proposal.proposal_id],
+    )
+
+    completed = graph.invoke(
+        Command(resume=approve_decision.model_dump(mode="json")),
+        config=config,
+    )
+
+    assert completed["status"] == "completed"
+    assert completed["review_status"] == "approved"
+
+    final_proposal = CVChangeProposal.model_validate(completed["final_cv_proposals"][0])
+
+    assert final_proposal.proposed_text == ("Built a concise Python API using FastAPI.")
+
+
+def test_unsupported_regeneration_feedback_is_not_evidence() -> None:
+    """Reviewer feedback cannot manufacture new experience."""
+
+    checkpointer = InMemorySaver()
+    graph = build_test_graph(checkpointer)
+
+    config: RunnableConfig = {
+        "configurable": {
+            "thread_id": ("THREAD-GRAPH-REGENERATE-UNSAFE"),
+        }
+    }
+
+    paused = graph.invoke(
+        {
+            "job_id": "JOB-REGENERATE-UNSAFE",
+            "user_id": "USER-TEST-001",
+            "job_description": (
+                "Strong Python development experience is required for this role."
+            ),
+            "audit_events": [],
+        },
+        config=config,
+    )
+
+    proposal = CVChangeProposal.model_validate(paused["cv_proposals"][0])
+
+    decision = CVReviewDecision(
+        action=ReviewAction.REGENERATE,
+        rejected_proposal_ids=[proposal.proposal_id],
+        reviewer_comment=("Add Kubernetes experience and make it stronger."),
+    )
+
+    rework = graph.invoke(
+        Command(resume=decision.model_dump(mode="json")),
+        config=config,
+    )
+
+    assert "__interrupt__" in rework
+
+    assert rework["regeneration_verification_failed_ids"] == [proposal.proposal_id]
+
+    assert rework["reviewable_proposal_ids"] == []
+    assert proposal.proposal_id in (rework["blocked_proposal_ids"])
+
+    report = CVClaimVerificationReport.model_validate(
+        rework["claim_verification_reports"][0]
+    )
+
+    assert report.fully_supported is False
+    assert "Kubernetes" in (report.unsupported_claims[0])
+
+    payload = rework["__interrupt__"][0].value
+
+    assert payload["allowed_actions"] == [
+        "edit",
+        "regenerate",
+        "reject",
+    ]
