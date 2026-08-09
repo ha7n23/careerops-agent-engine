@@ -5,9 +5,20 @@ from pydantic import BaseModel, ConfigDict
 from careerops_agent_engine.domain.enums import (
     CareerDocumentFormat,
     CareerDocumentStatus,
+    CVEvidenceReviewRunStatus,
 )
 from careerops_agent_engine.domain.models.document import (
     CareerDocument,
+)
+from careerops_agent_engine.domain.models.evidence import (
+    CareerEvidenceOverlapFinding,
+    CareerEvidenceProposal,
+)
+from careerops_agent_engine.domain.models.evidence_audit import (
+    CVEvidenceReviewRunSnapshot,
+)
+from careerops_agent_engine.domain.models.evidence_review import (
+    EvidenceReviewResult,
 )
 
 
@@ -39,4 +50,37 @@ class CareerDocumentUploadResponse(BaseModel):
             size_bytes=document.size_bytes,
             sha256_hex=document.sha256_hex,
             status=document.status,
+        )
+
+
+class CVEvidenceReviewRunResponse(BaseModel):
+    """Public state of one durable CV evidence-review run."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    review_run_id: str
+    document_id: str
+    status: CVEvidenceReviewRunStatus
+
+    proposals: list[CareerEvidenceProposal]
+    overlap_findings: list[CareerEvidenceOverlapFinding]
+    document_warnings: list[str]
+
+    review_result: EvidenceReviewResult | None = None
+
+    @classmethod
+    def from_domain(
+        cls,
+        snapshot: CVEvidenceReviewRunSnapshot,
+    ) -> "CVEvidenceReviewRunResponse":
+        """Build a safe response without exposing the owning user ID."""
+
+        return cls(
+            review_run_id=snapshot.review_run_id,
+            document_id=snapshot.document_id,
+            status=snapshot.status,
+            proposals=list(snapshot.proposals),
+            overlap_findings=list(snapshot.overlap_findings),
+            document_warnings=list(snapshot.document_warnings),
+            review_result=snapshot.review_result,
         )

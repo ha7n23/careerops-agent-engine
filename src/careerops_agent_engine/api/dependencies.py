@@ -7,6 +7,12 @@ from fastapi import Header, HTTPException, status
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
+from careerops_agent_engine.application.ports.career_document_repository import (
+    CareerDocumentRepository,
+)
+from careerops_agent_engine.application.ports.cv_evidence_audit_repository import (
+    CVEvidenceAuditRepository,
+)
 from careerops_agent_engine.application.ports.evidence_repository import (
     EvidenceRepository,
 )
@@ -16,8 +22,29 @@ from careerops_agent_engine.application.ports.job_analysis_audit_repository impo
 from careerops_agent_engine.application.services.cv_claim_verification import (
     CVClaimVerificationService,
 )
+from careerops_agent_engine.application.services.cv_document_extraction import (
+    CVDocumentExtractionService,
+)
+from careerops_agent_engine.application.services.cv_document_ingestion import (
+    CVDocumentIngestionService,
+)
+from careerops_agent_engine.application.services.cv_document_preparation import (
+    CVDocumentPreparationService,
+)
 from careerops_agent_engine.application.services.cv_document_upload import (
     CVDocumentUploadService,
+)
+from careerops_agent_engine.application.services.cv_evidence_duplicates import (
+    CVEvidenceDuplicateDetector,
+)
+from careerops_agent_engine.application.services.cv_evidence_proposals import (
+    CVEvidenceProposalService,
+)
+from careerops_agent_engine.application.services.cv_evidence_review import (
+    CVEvidenceReviewService,
+)
+from careerops_agent_engine.application.services.cv_evidence_workflow import (
+    CVEvidenceWorkflowService,
 )
 from careerops_agent_engine.application.services.cv_proposals import (
     CVProposalGenerationService,
@@ -33,14 +60,27 @@ from careerops_agent_engine.infrastructure.database.session import (
     create_database_engine,
     create_session_factory,
 )
+from careerops_agent_engine.infrastructure.documents.cv_section_parser import (
+    DeterministicCVSectionParser,
+)
+from careerops_agent_engine.infrastructure.documents.native_document_extractor import (
+    NativeDocumentExtractor,
+)
 from careerops_agent_engine.infrastructure.llm.factory import (
     create_cv_claim_verifier,
+    create_cv_evidence_extractor,
     create_cv_proposal_generator,
     create_evidence_discovery_runner,
     create_requirement_extractor,
 )
 from careerops_agent_engine.infrastructure.repositories import (
     sqlalchemy_job_analysis_audit,
+)
+from careerops_agent_engine.infrastructure.repositories.sqlalchemy_career_documents import (  # noqa: E501
+    SqlAlchemyCareerDocumentRepository,
+)
+from careerops_agent_engine.infrastructure.repositories.sqlalchemy_cv_evidence_audit import (  # noqa: E501
+    SqlAlchemyCVEvidenceAuditRepository,
 )
 from careerops_agent_engine.infrastructure.repositories.sqlalchemy_evidence import (
     SqlAlchemyEvidenceRepository,
@@ -115,6 +155,64 @@ def get_cv_document_upload_service() -> CVDocumentUploadService:
     return CVDocumentUploadService(
         storage=get_document_storage(),
         max_upload_bytes=(settings.document_upload_max_bytes),
+    )
+
+
+@lru_cache
+def get_career_document_repository() -> CareerDocumentRepository:
+    """Create the PostgreSQL career-document repository."""
+
+    return SqlAlchemyCareerDocumentRepository(get_database_session_factory())
+
+
+@lru_cache
+def get_cv_evidence_audit_repository() -> CVEvidenceAuditRepository:
+    """Create the PostgreSQL CV evidence-review audit repository."""
+
+    return SqlAlchemyCVEvidenceAuditRepository(get_database_session_factory())
+
+
+@lru_cache
+def get_cv_document_ingestion_service() -> CVDocumentIngestionService:
+    """Create the persistent CV ingestion service."""
+
+    return CVDocumentIngestionService(
+        upload_service=get_cv_document_upload_service(),
+        repository=get_career_document_repository(),
+        storage=get_document_storage(),
+    )
+
+
+@lru_cache
+def get_cv_document_preparation_service() -> CVDocumentPreparationService:
+    """Create native extraction and deterministic CV preparation."""
+
+    extraction_service = CVDocumentExtractionService(
+        storage=get_document_storage(),
+        extractor=NativeDocumentExtractor(),
+    )
+
+    return CVDocumentPreparationService(
+        extraction_service=extraction_service,
+        section_parser=DeterministicCVSectionParser(),
+    )
+
+
+@lru_cache
+def get_cv_evidence_workflow_service() -> CVEvidenceWorkflowService:
+    """Create the persistent CV evidence-review workflow."""
+
+    evidence_repository = get_evidence_repository()
+
+    return CVEvidenceWorkflowService(
+        document_repository=get_career_document_repository(),
+        audit_repository=get_cv_evidence_audit_repository(),
+        preparation_service=get_cv_document_preparation_service(),
+        proposal_service=CVEvidenceProposalService(
+            extractor=create_cv_evidence_extractor()
+        ),
+        duplicate_detector=CVEvidenceDuplicateDetector(repository=evidence_repository),
+        review_service=CVEvidenceReviewService(),
     )
 
 

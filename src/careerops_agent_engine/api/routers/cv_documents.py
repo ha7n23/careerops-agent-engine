@@ -13,16 +13,24 @@ from fastapi import (
 
 from careerops_agent_engine.api.dependencies import (
     get_authenticated_user_id,
-    get_cv_document_upload_service,
+    get_cv_document_ingestion_service,
+    get_cv_evidence_workflow_service,
 )
 from careerops_agent_engine.api.schemas.cv_documents import (
     CareerDocumentUploadResponse,
+    CVEvidenceReviewRunResponse,
 )
 from careerops_agent_engine.application.exceptions import (
+    CareerDocumentUnavailableError,
+    CVEvidenceProposalValidationError,
+    DocumentExtractionError,
     DocumentUploadValidationError,
 )
-from careerops_agent_engine.application.services.cv_document_upload import (
-    CVDocumentUploadService,
+from careerops_agent_engine.application.services.cv_document_ingestion import (
+    CVDocumentIngestionService,
+)
+from careerops_agent_engine.application.services.cv_evidence_workflow import (
+    CVEvidenceWorkflowService,
 )
 
 router = APIRouter(
@@ -30,9 +38,14 @@ router = APIRouter(
     tags=["CV Documents"],
 )
 
-CVDocumentUploadServiceDependency = Annotated[
-    CVDocumentUploadService,
-    Depends(get_cv_document_upload_service),
+CVDocumentIngestionServiceDependency = Annotated[
+    CVDocumentIngestionService,
+    Depends(get_cv_document_ingestion_service),
+]
+
+CVEvidenceWorkflowServiceDependency = Annotated[
+    CVEvidenceWorkflowService,
+    Depends(get_cv_evidence_workflow_service),
 ]
 
 AuthenticatedUserIdDependency = Annotated[
@@ -52,7 +65,7 @@ async def upload_cv_document(
         UploadFile,
         File(description=("Candidate CV in PDF or DOCX format.")),
     ],
-    service: CVDocumentUploadServiceDependency,
+    service: CVDocumentIngestionServiceDependency,
     user_id: AuthenticatedUserIdDependency,
 ) -> CareerDocumentUploadResponse:
     """Validate and securely store one user-owned CV document."""
@@ -62,7 +75,7 @@ async def upload_cv_document(
         # configured limit has been exceeded.
         data = await file.read(service.max_upload_bytes + 1)
 
-        document = service.upload(
+        document = service.ingest(
             user_id=user_id,
             original_filename=(file.filename or ""),
             declared_media_type=(file.content_type),
@@ -88,3 +101,43 @@ async def upload_cv_document(
         await file.close()
 
     return CareerDocumentUploadResponse.from_domain(document)
+
+
+@router.post(
+    "/{document_id}/evidence-review",
+    response_model=CVEvidenceReviewRunResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Start or recover CV evidence review",
+)
+def start_cv_evidence_review(
+    document_id: str,
+    service: CVEvidenceWorkflowServiceDependency,
+    user_id: AuthenticatedUserIdDependency,
+) -> CVEvidenceReviewRunResponse:
+    """Create or recover the durable evidence-review state."""
+
+    try:
+        snapshot = service.start_review(
+            user_id=user_id,
+            document_id=document_id,
+        )
+
+    except CareerDocumentUnavailableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+
+    except DocumentExtractionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+
+    except CVEvidenceProposalValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=("The CV evidence extractor returned an invalid structured result."),
+        ) from exc
+
+    return CVEvidenceReviewRunResponse.from_domain(snapshot)

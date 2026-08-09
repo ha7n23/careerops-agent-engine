@@ -39,3 +39,11 @@ class CVEvidenceProposalValidationError(ValueError):
 
 class CVEvidenceReviewValidationError(ValueError):
     """Human CV-evidence review failed deterministic validation."""
+
+
+class CareerDocumentUnavailableError(ValueError):
+    """A user-owned career document cannot be accessed for processing."""
+
+
+class CVEvidenceReviewRunUnavailableError(ValueError):
+    """A CV evidence-review run cannot be accessed or reviewed."""

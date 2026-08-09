@@ -109,3 +109,11 @@ class EvidenceOverlapScope(StrEnum):
 
     WITHIN_DOCUMENT = "within_document"
     APPROVED_EVIDENCE = "approved_evidence"
+
+
+class CVEvidenceReviewRunStatus(StrEnum):
+    """Business lifecycle status of one CV evidence-review run."""
+
+    AWAITING_REVIEW = "awaiting_review"
+    COMPLETED = "completed"
+    INVALID = "invalid"

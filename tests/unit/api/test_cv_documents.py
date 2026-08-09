@@ -8,13 +8,19 @@ import pytest
 from fastapi.testclient import TestClient
 
 from careerops_agent_engine.api.dependencies import (
-    get_cv_document_upload_service,
+    get_cv_document_ingestion_service,
+)
+from careerops_agent_engine.application.services.cv_document_ingestion import (
+    CVDocumentIngestionService,
 )
 from careerops_agent_engine.application.services.cv_document_upload import (
     CVDocumentUploadService,
 )
 from careerops_agent_engine.domain.enums import (
     CareerDocumentFormat,
+)
+from careerops_agent_engine.domain.models.document import (
+    CareerDocument,
 )
 from careerops_agent_engine.main import app
 
@@ -68,6 +74,46 @@ class FakeDocumentStorage:
         del self.saved[storage_key]
 
 
+class FakeDocumentRepository:
+    """Persist uploaded document metadata in memory."""
+
+    def __init__(self) -> None:
+        self.documents: dict[
+            tuple[str, str],
+            CareerDocument,
+        ] = {}
+
+    def save(
+        self,
+        *,
+        user_id: str,
+        document: CareerDocument,
+    ) -> None:
+        """Persist the latest document metadata."""
+
+        self.documents[
+            (
+                user_id,
+                document.document_id,
+            )
+        ] = document
+
+    def get(
+        self,
+        *,
+        user_id: str,
+        document_id: str,
+    ) -> CareerDocument | None:
+        """Retrieve metadata within its user boundary."""
+
+        return self.documents.get(
+            (
+                user_id,
+                document_id,
+            )
+        )
+
+
 def build_docx_bytes() -> bytes:
     """Create a minimal DOCX-shaped test archive."""
 
@@ -97,24 +143,38 @@ def document_storage() -> FakeDocumentStorage:
 
 
 @pytest.fixture
+def document_repository() -> FakeDocumentRepository:
+    """Provide isolated document metadata persistence."""
+
+    return FakeDocumentRepository()
+
+
+@pytest.fixture
 def client(
     document_storage: FakeDocumentStorage,
+    document_repository: FakeDocumentRepository,
 ) -> Iterator[TestClient]:
     """Create an API client with fake document storage."""
 
-    service = CVDocumentUploadService(
+    upload_service = CVDocumentUploadService(
         storage=document_storage,
         max_upload_bytes=1024,
     )
 
-    app.dependency_overrides[get_cv_document_upload_service] = lambda: service
+    service = CVDocumentIngestionService(
+        upload_service=upload_service,
+        repository=document_repository,
+        storage=document_storage,
+    )
+
+    app.dependency_overrides[get_cv_document_ingestion_service] = lambda: service
 
     try:
         with TestClient(app) as test_client:
             yield test_client
     finally:
         app.dependency_overrides.pop(
-            get_cv_document_upload_service,
+            get_cv_document_ingestion_service,
             None,
         )
 
@@ -122,6 +182,7 @@ def client(
 def test_pdf_upload_returns_safe_metadata(
     client: TestClient,
     document_storage: FakeDocumentStorage,
+    document_repository: FakeDocumentRepository,
 ) -> None:
     """A valid PDF should return 201 without storage internals."""
 
@@ -163,6 +224,15 @@ def test_pdf_upload_returns_safe_metadata(
     assert "storage_key" not in body
 
     assert list(document_storage.saved.values()) == [data]
+
+    persisted = document_repository.get(
+        user_id="USER-001",
+        document_id=body["document_id"],
+    )
+
+    assert persisted is not None
+    assert persisted.original_filename == "cv.pdf"
+    assert persisted.sha256_hex == body["sha256_hex"]
 
 
 def test_docx_upload_returns_created(
