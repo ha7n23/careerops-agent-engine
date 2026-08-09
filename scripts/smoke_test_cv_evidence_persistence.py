@@ -27,8 +27,7 @@ from careerops_agent_engine.domain.models.evidence_review import (
 )
 
 DOCX_MEDIA_TYPE = (
-    "application/vnd.openxmlformats-officedocument."
-    "wordprocessingml.document"
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 )
 
 
@@ -61,9 +60,7 @@ def build_synthetic_cv_docx() -> bytes:
     )
 
     document.add_heading("Education", level=1)
-    document.add_paragraph(
-        "BSc Computer Science, University of Southampton."
-    )
+    document.add_paragraph("BSc Computer Science, University of Southampton.")
 
     stream = BytesIO()
     document.save(stream)
@@ -108,18 +105,19 @@ def assert_awaiting_row(
     )
 
     with get_database_engine().connect() as connection:
-        row = connection.execute(
-            statement,
-            {"review_run_id": review_run_id},
-        ).mappings().one()
+        row = (
+            connection.execute(
+                statement,
+                {"review_run_id": review_run_id},
+            )
+            .mappings()
+            .one()
+        )
 
     assert row["status"] == "awaiting_review"
     assert bool(row["review_result_is_sql_null"]) is True
 
-    print(
-        "PostgreSQL awaiting row verified: "
-        "review_result is real SQL NULL."
-    )
+    print("PostgreSQL awaiting row verified: review_result is real SQL NULL.")
 
 
 def assert_completed_database_state(
@@ -131,18 +129,22 @@ def assert_completed_database_state(
     """Verify completed run, history and approved evidence rows."""
 
     with get_database_engine().connect() as connection:
-        run = connection.execute(
-            text(
-                """
+        run = (
+            connection.execute(
+                text(
+                    """
                 SELECT
                     status,
                     review_result IS NOT NULL AS has_review_result
                 FROM cv_evidence_review_runs
                 WHERE review_run_id = :review_run_id
                 """
-            ),
-            {"review_run_id": review_run_id},
-        ).mappings().one()
+                ),
+                {"review_run_id": review_run_id},
+            )
+            .mappings()
+            .one()
+        )
 
         history_count = connection.execute(
             text(
@@ -206,10 +208,7 @@ def main() -> None:
         document_id=document.document_id,
     )
 
-    assert (
-        awaiting.status
-        is CVEvidenceReviewRunStatus.AWAITING_REVIEW
-    ), (
+    assert awaiting.status is CVEvidenceReviewRunStatus.AWAITING_REVIEW, (
         "Expected Gemini to produce at least one grounded evidence proposal, "
         f"but workflow status was {awaiting.status.value!r}."
     )
@@ -252,16 +251,10 @@ def main() -> None:
     print("Restart recovery: PASSED")
     print("Exact persisted review snapshot recovered.")
 
-    proposal_ids = [
-        proposal.proposal_id
-        for proposal in recovered.proposals
-    ]
+    proposal_ids = [proposal.proposal_id for proposal in recovered.proposals]
 
     acknowledged_overlap_ids = sorted(
-        {
-            finding.proposal_id
-            for finding in recovered.overlap_findings
-        }
+        {finding.proposal_id for finding in recovered.overlap_findings}
     )
 
     decision = EvidenceReviewDecision(
@@ -279,10 +272,7 @@ def main() -> None:
         decision=decision,
     )
 
-    assert (
-        completed.status
-        is CVEvidenceReviewRunStatus.COMPLETED
-    )
+    assert completed.status is CVEvidenceReviewRunStatus.COMPLETED
     assert completed.review_result is not None
 
     approved_evidence = completed.review_result.approved_evidence

@@ -98,6 +98,10 @@ class SqlAlchemyCVEvidenceAuditRepository(CVEvidenceAuditRepository):
                 snapshot=snapshot,
             )
 
+            # Ensure a newly created parent review-run row exists in the
+            # database before inserting child history rows that reference it.
+            session.flush()
+
             existing_sequence = session.execute(
                 select(CVEvidenceReviewHistoryRecord).where(
                     CVEvidenceReviewHistoryRecord.review_run_id == review.review_run_id,
