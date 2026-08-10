@@ -26,5 +26,45 @@ services:
       retries: 10
       start_period: 10s
 
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    image: careerops-agent-engine:dev
+    container_name: careerops-api
+    restart: unless-stopped
+
+    env_file:
+      - .env
+
+    environment:
+      # Containers communicate through the Compose service name,
+      # not localhost / 127.0.0.1.
+      CAREEROPS_DATABASE_URL: >-
+        postgresql+psycopg://careerops:careerops_local_dev@postgres:5432/careerops
+
+      CAREEROPS_LANGGRAPH_DATABASE_URI: >-
+        postgresql://careerops:careerops_local_dev@postgres:5432/careerops
+
+      # The Linux container has LibreOffice on PATH.
+      # Do not use the Windows path from the local .env file.
+      CAREEROPS_LIBREOFFICE_EXECUTABLE: soffice
+
+      # Generated files live in the persistent application volume.
+      CAREEROPS_DOCUMENT_STORAGE_ROOT: /app/.careerops_data/documents
+      CAREEROPS_ARTIFACT_STORAGE_ROOT: /app/.careerops_data/artifacts
+
+    ports:
+      - "8000:8000"
+
+    volumes:
+      - careerops_runtime_data:/app/.careerops_data
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 volumes:
   careerops_postgres_data:
+  careerops_runtime_data:

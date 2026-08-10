@@ -1,0 +1,36 @@
+# Git
+.git
+.github
+
+# Python caches and tooling
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local environments and secrets
+.venv/
+.env
+.env.*
+
+# IDE / OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Tests are not required in the production runtime image
+tests/
+
+# Local generated data
+.careerops_data/
+storage/
+output/
+*.pdf
+*.docx
+
+# Local archives
+*.zip
