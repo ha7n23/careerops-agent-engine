@@ -8,6 +8,9 @@ from careerops_agent_engine.api.routers.cv_documents import (
 from careerops_agent_engine.api.routers.cv_evidence_reviews import (
     router as cv_evidence_reviews_router,
 )
+from careerops_agent_engine.api.routers.cv_versions import (
+    router as cv_versions_router,
+)
 from careerops_agent_engine.api.routers.health import router as health_router
 from careerops_agent_engine.api.routers.job_analysis import (
     router as job_analysis_router,
@@ -33,6 +36,7 @@ def create_app() -> FastAPI:
     application.include_router(job_analysis_router)
     application.include_router(cv_documents_router)
     application.include_router(cv_evidence_reviews_router)
+    application.include_router(cv_versions_router)
 
     return application
 

@@ -47,3 +47,27 @@ class CareerDocumentUnavailableError(ValueError):
 
 class CVEvidenceReviewRunUnavailableError(ValueError):
     """A CV evidence-review run cannot be accessed or reviewed."""
+
+
+class StructuredCVAssemblyError(ValueError):
+    """Parsed source CV cannot be assembled without losing content."""
+
+
+class CVRenderingError(ValueError):
+    """A structured CV could not be rendered safely."""
+
+
+class CVArtifactVerificationError(ValueError):
+    """A generated CV artifact could not enter verification safely."""
+
+
+class CVPDFConversionError(ValueError):
+    """A verified DOCX could not be converted safely to PDF."""
+
+
+class FinalCVGenerationError(ValueError):
+    """A final CV version could not complete its trusted artifact workflow."""
+
+
+class CVArtifactRetrievalError(ValueError):
+    """A generated CV version or artifact could not be retrieved safely."""

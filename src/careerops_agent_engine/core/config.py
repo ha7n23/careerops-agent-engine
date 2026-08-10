@@ -73,6 +73,16 @@ class Settings(BaseSettings):
 
     document_storage_root: Path = Path(".careerops_data/documents")
 
+    artifact_storage_root: Path = Path(".careerops_data/artifacts")
+
+    libreoffice_executable: str = "soffice"
+
+    pdf_conversion_timeout_seconds: float = Field(
+        default=60.0,
+        gt=0.0,
+        le=300.0,
+    )
+
 
 @lru_cache
 def get_settings() -> Settings:

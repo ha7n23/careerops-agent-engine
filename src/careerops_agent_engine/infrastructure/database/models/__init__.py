@@ -5,6 +5,10 @@ from careerops_agent_engine.infrastructure.database.models.cv_evidence import (
     CVEvidenceReviewHistoryRecord,
     CVEvidenceReviewRunRecord,
 )
+from careerops_agent_engine.infrastructure.database.models.cv_version import (
+    CVArtifactRecord,
+    CVVersionRecord,
+)
 from careerops_agent_engine.infrastructure.database.models.evidence import (
     CareerEvidenceRecord,
 )
@@ -17,6 +21,8 @@ __all__ = [
     "CVEvidenceReviewHistoryRecord",
     "CVEvidenceReviewRunRecord",
     "CVReviewHistoryRecord",
+    "CVArtifactRecord",
+    "CVVersionRecord",
     "CareerDocumentRecord",
     "CareerEvidenceRecord",
     "JobAnalysisRunRecord",

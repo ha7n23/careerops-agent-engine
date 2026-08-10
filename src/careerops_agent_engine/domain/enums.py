@@ -117,3 +117,32 @@ class CVEvidenceReviewRunStatus(StrEnum):
     AWAITING_REVIEW = "awaiting_review"
     COMPLETED = "completed"
     INVALID = "invalid"
+
+
+class CVVersionStatus(StrEnum):
+    """Lifecycle status of one immutable CV version."""
+
+    ASSEMBLED = "assembled"
+    RENDERED = "rendered"
+    VERIFIED = "verified"
+
+
+class CVArtifactFormat(StrEnum):
+    """Supported rendered CV artifact formats."""
+
+    DOCX = "docx"
+    PDF = "pdf"
+
+
+class CVArtifactVerificationStatus(StrEnum):
+    """Verification state of a rendered CV artifact."""
+
+    PENDING = "pending"
+    VERIFIED = "verified"
+    FAILED = "failed"
+
+
+class CVChangeApplicationMode(StrEnum):
+    """How an approved CV proposal was applied to source content."""
+
+    ANCHORED_REPLACEMENT = "anchored_replacement"
