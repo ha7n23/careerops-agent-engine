@@ -12,3 +12,10 @@ class HealthResponse(BaseModel):
     service: str
     version: str
     environment: str
+
+
+class ReadinessResponse(BaseModel):
+    """Current readiness of required CareerOps infrastructure."""
+
+    status: Literal["ready"]
+    database: Literal["ok"]

@@ -26,6 +26,36 @@ services:
       retries: 10
       start_period: 10s
 
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    image: careerops-agent-engine:dev
+    container_name: careerops-migrate
+    restart: "no"
+
+    env_file:
+      - .env
+
+    environment:
+      CAREEROPS_DATABASE_URL: >-
+        postgresql+psycopg://careerops:careerops_local_dev@postgres:5432/careerops
+
+      CAREEROPS_LANGGRAPH_DATABASE_URI: >-
+        postgresql://careerops:careerops_local_dev@postgres:5432/careerops
+
+    command:
+      [
+        "python",
+        "scripts/initialize_database.py",
+      ]
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   api:
     build:
       context: .
@@ -64,6 +94,9 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+
+      migrate:
+        condition: service_completed_successfully
 
 volumes:
   careerops_postgres_data:
