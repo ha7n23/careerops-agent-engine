@@ -64,6 +64,7 @@ services:
     image: careerops-agent-engine:dev
     container_name: careerops-api
     restart: unless-stopped
+    stop_grace_period: 30s
 
     env_file:
       - .env
