@@ -10,6 +10,9 @@ from langchain.agents.middleware import (
     ToolCallLimitMiddleware,
 )
 from langchain_core.messages import BaseMessage
+from langchain_core.rate_limiters import (
+    BaseRateLimiter,
+)
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 from careerops_agent_engine.agents.prompts.evidence_discovery import (
@@ -34,6 +37,9 @@ from careerops_agent_engine.domain.models.job import JobRequirement
 from careerops_agent_engine.infrastructure.llm.agent_trajectory import (
     inspect_evidence_agent_trajectory,
 )
+from careerops_agent_engine.infrastructure.observability.langsmith import (
+    build_langsmith_run_config,
+)
 
 
 class LangChainEvidenceDiscoveryAgent:
@@ -44,6 +50,7 @@ class LangChainEvidenceDiscoveryAgent:
         *,
         repository: EvidenceRepository,
         settings: Settings,
+        rate_limiter: BaseRateLimiter | None = None,
     ) -> None:
         """Create the model, tools and bounded agent harness."""
 
@@ -53,6 +60,7 @@ class LangChainEvidenceDiscoveryAgent:
             timeout=settings.llm_timeout_seconds,
             max_retries=settings.llm_max_retries,
             thinking_level="low",
+            rate_limiter=rate_limiter,
         )
 
         tools = create_evidence_tools(repository)
@@ -127,18 +135,21 @@ class LangChainEvidenceDiscoveryAgent:
             },
             context=EvidenceAgentContext(user_id=user_id),
             config={
-                "recursion_limit": self._recursion_limit,
-                "run_name": "discover_requirement_evidence",
-                "tags": [
-                    "careerops",
-                    "evidence-discovery",
-                    "tool-calling-agent",
-                ],
-                "metadata": {
-                    "requirement_id": requirement.requirement_id,
-                    "prompt_version": PROMPT_VERSION,
-                    "model_name": self._model_name,
-                },
+                **build_langsmith_run_config(
+                    run_name=("discover_requirement_evidence"),
+                    tags=[
+                        "evidence-discovery",
+                        "tool-calling-agent",
+                        "llm",
+                    ],
+                    metadata={
+                        "component": ("evidence_discovery_agent"),
+                        "requirement_id": (requirement.requirement_id),
+                        "prompt_version": (PROMPT_VERSION),
+                        "ls_model_name": (self._model_name),
+                    },
+                ),
+                "recursion_limit": (self._recursion_limit),
             },
         )
 

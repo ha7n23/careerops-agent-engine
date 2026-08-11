@@ -3,6 +3,9 @@
 import json
 from typing import Any
 
+from langchain_core.rate_limiters import (
+    BaseRateLimiter,
+)
 from langchain_google_genai import (
     ChatGoogleGenerativeAI,
 )
@@ -20,6 +23,9 @@ from careerops_agent_engine.domain.models.evidence import (
 from careerops_agent_engine.infrastructure.llm.schemas import (
     ExtractedCareerEvidenceSet,
 )
+from careerops_agent_engine.infrastructure.observability.langsmith import (
+    build_langsmith_run_config,
+)
 
 
 class GoogleCVEvidenceExtractor:
@@ -32,6 +38,7 @@ class GoogleCVEvidenceExtractor:
         temperature: float,
         timeout_seconds: float,
         max_retries: int,
+        rate_limiter: BaseRateLimiter | None = None,
     ) -> None:
         """Initialise Gemini structured output."""
 
@@ -41,6 +48,7 @@ class GoogleCVEvidenceExtractor:
             timeout=timeout_seconds,
             max_retries=max_retries,
             thinking_level="minimal",
+            rate_limiter=rate_limiter,
         )
 
         self._structured_model = model.with_structured_output(
@@ -76,20 +84,21 @@ class GoogleCVEvidenceExtractor:
 
         raw_result: Any = self._structured_model.invoke(
             messages,
-            config={
-                "run_name": ("extract_cv_evidence_candidates"),
-                "tags": [
-                    "careerops",
+            config=build_langsmith_run_config(
+                run_name=("extract_cv_evidence_candidates"),
+                tags=[
                     "cv-ingestion",
                     "evidence-extraction",
                     "structured-output",
+                    "llm",
                 ],
-                "metadata": {
+                metadata={
+                    "component": ("cv_evidence_extractor"),
                     "document_id": (document.document_id),
                     "prompt_version": (PROMPT_VERSION),
-                    "model_name": (self._model_name),
+                    "ls_model_name": (self._model_name),
                 },
-            },
+            ),
         )
 
         extracted = ExtractedCareerEvidenceSet.model_validate(raw_result)

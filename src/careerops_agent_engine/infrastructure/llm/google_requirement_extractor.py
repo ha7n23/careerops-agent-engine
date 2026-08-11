@@ -2,6 +2,9 @@
 
 from typing import Any
 
+from langchain_core.rate_limiters import (
+    BaseRateLimiter,
+)
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 from careerops_agent_engine.agents.prompts.job_requirements import (
@@ -15,6 +18,9 @@ from careerops_agent_engine.domain.models.job import (
 from careerops_agent_engine.infrastructure.llm.schemas import (
     ExtractedRequirementSet,
 )
+from careerops_agent_engine.infrastructure.observability.langsmith import (
+    build_langsmith_run_config,
+)
 
 
 class GoogleRequirementExtractor:
@@ -27,6 +33,7 @@ class GoogleRequirementExtractor:
         temperature: float,
         timeout_seconds: float,
         max_retries: int,
+        rate_limiter: BaseRateLimiter | None = None,
     ) -> None:
         """Initialise the provider adapter."""
 
@@ -36,6 +43,7 @@ class GoogleRequirementExtractor:
             timeout=timeout_seconds,
             max_retries=max_retries,
             thinking_level="minimal",
+            rate_limiter=rate_limiter,
         )
 
         self._structured_model = model.with_structured_output(
@@ -58,19 +66,20 @@ class GoogleRequirementExtractor:
 
         raw_result: Any = self._structured_model.invoke(
             messages,
-            config={
-                "run_name": "extract_job_requirements",
-                "tags": [
-                    "careerops",
+            config=build_langsmith_run_config(
+                run_name=("extract_job_requirements"),
+                tags=[
                     "job-analysis",
+                    "requirement-extraction",
                     "structured-output",
+                    "llm",
                 ],
-                "metadata": {
-                    "job_id": job_id,
-                    "prompt_version": PROMPT_VERSION,
-                    "model_name": self._model_name,
+                metadata={
+                    "component": ("requirement_extractor"),
+                    "prompt_version": (PROMPT_VERSION),
+                    "ls_model_name": (self._model_name),
                 },
-            },
+            ),
         )
 
         extracted = ExtractedRequirementSet.model_validate(raw_result)

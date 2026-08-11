@@ -4,6 +4,9 @@ import json
 from collections.abc import Sequence
 from typing import Any
 
+from langchain_core.rate_limiters import (
+    BaseRateLimiter,
+)
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 from careerops_agent_engine.agents.prompts.cv_proposal import (
@@ -24,6 +27,9 @@ from careerops_agent_engine.infrastructure.llm.schemas import (
     GeneratedCVProposalContent,
     ProposalEvidenceContext,
 )
+from careerops_agent_engine.infrastructure.observability.langsmith import (
+    build_langsmith_run_config,
+)
 
 
 class GoogleCVProposalGenerator:
@@ -36,6 +42,7 @@ class GoogleCVProposalGenerator:
         temperature: float,
         timeout_seconds: float,
         max_retries: int,
+        rate_limiter: BaseRateLimiter | None = None,
     ) -> None:
         """Initialise the structured-output model."""
 
@@ -45,6 +52,7 @@ class GoogleCVProposalGenerator:
             timeout=timeout_seconds,
             max_retries=max_retries,
             thinking_level="minimal",
+            rate_limiter=rate_limiter,
         )
 
         self._structured_model = model.with_structured_output(
@@ -79,7 +87,6 @@ class GoogleCVProposalGenerator:
         generated = self._invoke(
             messages=messages,
             run_name="generate_cv_proposal",
-            job_id=job_id,
             requirement=requirement,
             prompt_version=PROMPT_VERSION,
         )
@@ -119,7 +126,6 @@ class GoogleCVProposalGenerator:
         generated = self._invoke(
             messages=messages,
             run_name="regenerate_cv_proposal",
-            job_id=job_id,
             requirement=requirement,
             prompt_version=(REGENERATION_PROMPT_VERSION),
         )
@@ -135,7 +141,6 @@ class GoogleCVProposalGenerator:
         *,
         messages: list[Any],
         run_name: str,
-        job_id: str,
         requirement: JobRequirement,
         prompt_version: str,
     ) -> GeneratedCVProposalContent:
@@ -143,20 +148,20 @@ class GoogleCVProposalGenerator:
 
         raw_result: Any = self._structured_model.invoke(
             messages,
-            config={
-                "run_name": run_name,
-                "tags": [
-                    "careerops",
+            config=build_langsmith_run_config(
+                run_name=run_name,
+                tags=[
                     "cv-proposal",
                     "structured-output",
+                    "llm",
                 ],
-                "metadata": {
-                    "job_id": job_id,
+                metadata={
+                    "component": ("cv_proposal_generator"),
                     "requirement_id": (requirement.requirement_id),
-                    "prompt_version": prompt_version,
-                    "model_name": self._model_name,
+                    "prompt_version": (prompt_version),
+                    "ls_model_name": (self._model_name),
                 },
-            },
+            ),
         )
 
         return GeneratedCVProposalContent.model_validate(raw_result)

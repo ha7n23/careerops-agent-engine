@@ -1,5 +1,9 @@
 """Factories for model-backed application adapters."""
 
+from langchain_core.rate_limiters import (
+    BaseRateLimiter,
+)
+
 from careerops_agent_engine.application.ports.cv_claim_verifier import (
     CVClaimVerifier,
 )
@@ -34,6 +38,19 @@ from careerops_agent_engine.infrastructure.llm.google_cv_proposal_generator impo
 from careerops_agent_engine.infrastructure.llm.google_requirement_extractor import (
     GoogleRequirementExtractor,
 )
+from careerops_agent_engine.infrastructure.llm.rate_limiting import (
+    get_shared_llm_rate_limiter,
+)
+
+
+def _get_rate_limiter(
+    settings: Settings,
+) -> BaseRateLimiter:
+    """Return the shared model limiter for this process."""
+
+    return get_shared_llm_rate_limiter(
+        requests_per_minute=(settings.llm_requests_per_minute)
+    )
 
 
 def create_requirement_extractor(
@@ -48,6 +65,7 @@ def create_requirement_extractor(
         temperature=resolved_settings.llm_temperature,
         timeout_seconds=resolved_settings.llm_timeout_seconds,
         max_retries=resolved_settings.llm_max_retries,
+        rate_limiter=(_get_rate_limiter(resolved_settings)),
     )
 
 
@@ -62,6 +80,7 @@ def create_evidence_discovery_runner(
     return LangChainEvidenceDiscoveryAgent(
         repository=repository,
         settings=resolved_settings,
+        rate_limiter=(_get_rate_limiter(resolved_settings)),
     )
 
 
@@ -77,6 +96,7 @@ def create_cv_proposal_generator(
         temperature=resolved_settings.llm_temperature,
         timeout_seconds=resolved_settings.llm_timeout_seconds,
         max_retries=resolved_settings.llm_max_retries,
+        rate_limiter=(_get_rate_limiter(resolved_settings)),
     )
 
 
@@ -92,6 +112,7 @@ def create_cv_claim_verifier(
         temperature=resolved_settings.llm_temperature,
         timeout_seconds=resolved_settings.llm_timeout_seconds,
         max_retries=resolved_settings.llm_max_retries,
+        rate_limiter=(_get_rate_limiter(resolved_settings)),
     )
 
 
@@ -107,4 +128,5 @@ def create_cv_evidence_extractor(
         temperature=(resolved_settings.llm_temperature),
         timeout_seconds=(resolved_settings.llm_timeout_seconds),
         max_retries=(resolved_settings.llm_max_retries),
+        rate_limiter=(_get_rate_limiter(resolved_settings)),
     )

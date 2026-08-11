@@ -19,6 +19,11 @@ class Settings(BaseSettings):
     llm_temperature: float = Field(default=1.0, ge=0.0, le=2.0)
     llm_timeout_seconds: float = Field(default=60.0, gt=0.0)
     llm_max_retries: int = Field(default=2, ge=0, le=5)
+    llm_requests_per_minute: float = Field(
+        default=4.0,
+        gt=0.0,
+        le=600.0,
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env",

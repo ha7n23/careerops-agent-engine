@@ -53,11 +53,16 @@ from careerops_agent_engine.domain.models.cv import (
 from careerops_agent_engine.domain.models.verification import (
     CVClaimVerificationReport,
 )
+from careerops_agent_engine.infrastructure.observability.langsmith import (
+    build_langsmith_run_config,
+)
 
 CheckpointerFactory = Callable[
     [],
     AbstractContextManager[BaseCheckpointSaver[str]],
 ]
+
+JOB_ANALYSIS_WORKFLOW_VERSION = "job-analysis-v1"
 
 
 @dataclass(frozen=True)
@@ -108,11 +113,10 @@ class JobAnalysisService:
 
         thread_id = build_thread_id()
 
-        config: RunnableConfig = {
-            "configurable": {
-                "thread_id": thread_id,
-            }
-        }
+        config = build_job_analysis_config(
+            thread_id=thread_id,
+            resume=False,
+        )
 
         initial_state: JobAnalysisState = {
             "job_id": job_id,
@@ -150,11 +154,10 @@ class JobAnalysisService:
     ) -> JobAnalysisExecutionResult:
         """Resume and persist an authenticated human review."""
 
-        config: RunnableConfig = {
-            "configurable": {
-                "thread_id": thread_id,
-            }
-        }
+        config = build_job_analysis_config(
+            thread_id=thread_id,
+            resume=True,
+        )
 
         with self._checkpointer_factory() as checkpointer:
             graph = self._build_graph(checkpointer)
@@ -240,6 +243,45 @@ class JobAnalysisService:
             cv_claim_verification_service=(self._cv_claim_verification_service),
             checkpointer=checkpointer,
         )
+
+
+def build_job_analysis_config(
+    *,
+    thread_id: str,
+    resume: bool,
+) -> RunnableConfig:
+    """Build tracing and checkpoint configuration for one graph turn."""
+
+    if resume:
+        run_name = "careerops_job_analysis_review_resume"
+
+        phase_tag = "review-resume"
+
+    else:
+        run_name = "careerops_job_analysis_start"
+
+        phase_tag = "start"
+
+    config = build_langsmith_run_config(
+        run_name=run_name,
+        tags=[
+            "job-analysis",
+            "langgraph",
+            phase_tag,
+        ],
+        metadata={
+            "component": ("job_analysis_graph"),
+            "workflow": ("job-analysis"),
+            "workflow_version": (JOB_ANALYSIS_WORKFLOW_VERSION),
+            "thread_id": thread_id,
+        },
+    )
+
+    config["configurable"] = {
+        "thread_id": thread_id,
+    }
+
+    return config
 
 
 def build_thread_id() -> str:
