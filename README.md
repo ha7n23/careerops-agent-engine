@@ -14,7 +14,7 @@ CareerOps Agent Engine is a portfolio-grade AI engineering project built around 
 - **Production-style engineering:** PostgreSQL persistence and LangGraph checkpoints, LangSmith tracing/evaluation with privacy masking, FastAPI security boundaries, Dockerised runtime, Alembic migrations, and GitHub Actions container integration.
 - **Current quality baseline:** **376 passing tests**, **8 opt-in live integration tests skipped by default**, Ruff clean, and strict mypy checks across **147 source files**.
 
-> For the deeper design, trust boundaries, workflow states, persistence model, and trade-offs, see [Architecture](docs/architecture.md).
+> For the deeper design, trust boundaries, workflow states, persistence model, and trade-offs, see [Architecture](docs/ARCHITECTURE.md).
 
 ## Why this project exists
 
@@ -190,4 +190,4 @@ These boundaries keep the project focused on the harder AI-engineering concerns:
 
 ## Detailed architecture
 
-See **[docs/architecture.md](docs/architecture.md)** for the graph topology, evidence trust boundary, persistence model, document pipeline, observability/evaluation design, security model, and extension points.
+See **[docs/architecture.md](docs/ARCHITECTURE.md)** for the graph topology, evidence trust boundary, persistence model, document pipeline, observability/evaluation design, security model, and extension points.
