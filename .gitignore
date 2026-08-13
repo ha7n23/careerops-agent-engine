@@ -16,7 +16,7 @@ htmlcov/
 .idea/
 
 # Generated documents and local storage
-storage/
+/storage/
 output/
 .careerops_data/
 *.pdf

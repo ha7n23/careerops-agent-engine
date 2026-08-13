@@ -36,7 +36,7 @@ jobs:
         run: uv run ruff format --check .
 
       - name: Run linting
-        run: uv run ruff check . --fix
+        run: uv run ruff check .
 
       - name: Run type checking
         run: uv run python -m mypy src
