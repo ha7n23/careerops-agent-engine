@@ -2,6 +2,9 @@
 
 import re
 
+from careerops_agent_engine.domain.models.job import (
+    JobRequirementExtraction,
+)
 from careerops_agent_engine.evaluation.models import (
     ExpectedRequirement,
     RequirementExpectationEvaluation,
@@ -285,6 +288,26 @@ def _source_text_is_grounded(
     return all(
         _normalize_text(segment) in normalized_description
         for segment in source_segments
+    )
+
+
+def to_requirement_extraction_evaluation_output(
+    extraction: JobRequirementExtraction,
+) -> ExtractedRequirementSet:
+    """Convert production extraction output to evaluator input."""
+
+    return ExtractedRequirementSet(
+        role_title=extraction.role_title,
+        requirements=[
+            ExtractedRequirement(
+                name=requirement.name,
+                category=requirement.category,
+                evidence_expected=(requirement.evidence_expected),
+                importance_score=(requirement.importance_score),
+                source_text=(requirement.source_text),
+            )
+            for requirement in extraction.requirements
+        ],
     )
 
 

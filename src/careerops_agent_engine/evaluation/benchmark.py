@@ -1,15 +1,14 @@
 """Resumable real-model CareerOps evaluation benchmarks."""
 
 from collections.abc import Callable
-from hashlib import sha256
 from pathlib import Path
 from typing import Literal
 
 from careerops_agent_engine.application.ports.requirement_extractor import (
     RequirementExtractor,
 )
-from careerops_agent_engine.domain.models.job import (
-    JobRequirementExtraction,
+from careerops_agent_engine.evaluation.datasets import (
+    compute_dataset_sha256,
 )
 from careerops_agent_engine.evaluation.models import (
     RequirementExtractionBenchmarkIdentity,
@@ -20,12 +19,11 @@ from careerops_agent_engine.evaluation.models import (
 from careerops_agent_engine.evaluation.reporting import (
     write_evaluation_model_json_atomic,
 )
+from careerops_agent_engine.evaluation.requirement_extraction import (
+    to_requirement_extraction_evaluation_output,
+)
 from careerops_agent_engine.evaluation.runner import (
     evaluate_requirement_extraction_dataset,
-)
-from careerops_agent_engine.infrastructure.llm.schemas import (
-    ExtractedRequirement,
-    ExtractedRequirementSet,
 )
 
 type BenchmarkCaseStatus = Literal[
@@ -54,7 +52,7 @@ def build_requirement_extraction_benchmark_identity(
 ) -> RequirementExtractionBenchmarkIdentity:
     """Build provenance binding cached outputs to one exact setup."""
 
-    dataset_sha256 = sha256(dataset_path.read_bytes()).hexdigest()
+    dataset_sha256 = compute_dataset_sha256(dataset_path)
 
     return RequirementExtractionBenchmarkIdentity(
         dataset_name=dataset.dataset_name,
@@ -126,7 +124,7 @@ def run_requirement_extraction_benchmark(
         )
 
     evaluation_outputs = {
-        case_id: (_to_evaluation_output(extraction))
+        case_id: to_requirement_extraction_evaluation_output(extraction)
         for case_id, extraction in progress.outputs.items()
     }
 
@@ -168,26 +166,6 @@ def _load_or_create_progress(
         )
 
     return progress
-
-
-def _to_evaluation_output(
-    extraction: JobRequirementExtraction,
-) -> ExtractedRequirementSet:
-    """Convert production extraction output to evaluator input."""
-
-    return ExtractedRequirementSet(
-        role_title=extraction.role_title,
-        requirements=[
-            ExtractedRequirement(
-                name=requirement.name,
-                category=requirement.category,
-                evidence_expected=(requirement.evidence_expected),
-                importance_score=(requirement.importance_score),
-                source_text=(requirement.source_text),
-            )
-            for requirement in extraction.requirements
-        ],
-    )
 
 
 def _notify(

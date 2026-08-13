@@ -14,6 +14,8 @@ from careerops_agent_engine.domain.models.job import (
     JobRequirementExtraction,
 )
 
+type LangSmithExperimentMetadataValue = str | float | list[str]
+
 
 class ExpectedRequirement(DomainModel):
     """Gold expectation for one extracted job requirement."""
@@ -305,3 +307,70 @@ class RequirementExtractionBenchmarkResult(DomainModel):
             )
 
         return self
+
+
+class RequirementExtractionLangSmithDatasetSyncResult(DomainModel):
+    """Summary of one Git-to-LangSmith dataset synchronization."""
+
+    dataset_name: str = Field(
+        min_length=1,
+        max_length=100,
+    )
+    dataset_id: str = Field(
+        min_length=1,
+    )
+    dataset_created: bool
+
+    created_examples: int = Field(
+        ge=0,
+    )
+    updated_examples: int = Field(
+        ge=0,
+    )
+    deleted_examples: int = Field(
+        ge=0,
+    )
+    unchanged_examples: int = Field(
+        ge=0,
+    )
+    total_examples: int = Field(
+        ge=1,
+    )
+
+    @model_validator(mode="after")
+    def validate_sync_totals(self) -> Self:
+        """Require local-case accounting to remain complete."""
+
+        synchronized_total = (
+            self.created_examples + self.updated_examples + self.unchanged_examples
+        )
+
+        if synchronized_total != self.total_examples:
+            raise ValueError(
+                "Created, updated, and unchanged "
+                "examples must equal the local "
+                "dataset total."
+            )
+
+        return self
+
+
+class RequirementExtractionLangSmithExperimentContract(DomainModel):
+    """Stable configuration for one LangSmith experiment."""
+
+    dataset_name: str = Field(
+        min_length=1,
+        max_length=100,
+    )
+    experiment_prefix: str = Field(
+        min_length=1,
+        max_length=200,
+    )
+    description: str = Field(
+        min_length=1,
+        max_length=500,
+    )
+    metadata: dict[
+        str,
+        LangSmithExperimentMetadataValue,
+    ]

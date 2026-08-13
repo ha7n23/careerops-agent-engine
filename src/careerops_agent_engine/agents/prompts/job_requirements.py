@@ -2,7 +2,7 @@
 
 from langchain_core.prompts import ChatPromptTemplate
 
-PROMPT_VERSION = "job-requirements-v1"
+PROMPT_VERSION = "job-requirements-v3"
 
 JOB_REQUIREMENT_PROMPT = ChatPromptTemplate.from_messages(
     [
@@ -23,6 +23,10 @@ Extraction rules:
 - Do not assess a candidate.
 - Do not invent missing requirements.
 - Do not generate CV content.
+- If multiple statements express the same underlying requirement,
+  return that requirement only once.
+
+Output rules:
 - source_text must be a concise excerpt or close faithful quotation
   supporting the extracted requirement.
 - importance_score must be an integer from 1 to 5.
