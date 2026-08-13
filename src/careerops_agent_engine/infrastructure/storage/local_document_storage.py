@@ -10,9 +10,7 @@ from careerops_agent_engine.domain.enums import (
     CareerDocumentFormat,
 )
 
-SAFE_DOCUMENT_ID = re.compile(
-    r"^[A-Za-z0-9_-]{1,64}$"
-)
+SAFE_DOCUMENT_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
 class LocalDocumentStorage:
@@ -24,9 +22,7 @@ class LocalDocumentStorage:
     ) -> None:
         """Create and resolve the private storage root."""
 
-        self._root = Path(
-            root
-        ).expanduser().resolve()
+        self._root = Path(root).expanduser().resolve()
 
         self._root.mkdir(
             parents=True,
@@ -43,9 +39,7 @@ class LocalDocumentStorage:
     ) -> str:
         """Atomically persist bytes and return an opaque storage key."""
 
-        validate_document_id(
-            document_id
-        )
+        validate_document_id(document_id)
 
         storage_key = build_storage_key(
             user_id=user_id,
@@ -64,21 +58,15 @@ class LocalDocumentStorage:
         )
 
         if target.exists():
-            raise FileExistsError(
-                "Document storage target already exists."
-            )
+            raise FileExistsError("Document storage target already exists.")
 
-        temporary = target.with_name(
-            f".{target.name}.{uuid4().hex}.tmp"
-        )
+        temporary = target.with_name(f".{target.name}.{uuid4().hex}.tmp")
 
         try:
             with temporary.open("xb") as stream:
                 stream.write(data)
                 stream.flush()
-                os.fsync(
-                    stream.fileno()
-                )
+                os.fsync(stream.fileno())
 
             os.replace(
                 temporary,
@@ -106,9 +94,7 @@ class LocalDocumentStorage:
         try:
             return target.read_bytes()
         except FileNotFoundError as exc:
-            raise FileNotFoundError(
-                "The requested document is unavailable."
-            ) from exc
+            raise FileNotFoundError("The requested document is unavailable.") from exc
 
     def delete(
         self,
@@ -126,9 +112,7 @@ class LocalDocumentStorage:
         try:
             target.unlink()
         except FileNotFoundError as exc:
-            raise FileNotFoundError(
-                "The requested document is unavailable."
-            ) from exc
+            raise FileNotFoundError("The requested document is unavailable.") from exc
 
     def _resolve_owned_path(
         self,
@@ -138,21 +122,12 @@ class LocalDocumentStorage:
     ) -> Path:
         """Resolve one opaque key while preventing path traversal."""
 
-        expected_namespace = build_user_namespace(
-            user_id
-        )
+        expected_namespace = build_user_namespace(user_id)
 
-        if (
-            not storage_key
-            or "\\" in storage_key
-        ):
-            raise FileNotFoundError(
-                "The requested document is unavailable."
-            )
+        if not storage_key or "\\" in storage_key:
+            raise FileNotFoundError("The requested document is unavailable.")
 
-        key_path = PurePosixPath(
-            storage_key
-        )
+        key_path = PurePosixPath(storage_key)
 
         parts = key_path.parts
 
@@ -163,22 +138,12 @@ class LocalDocumentStorage:
             or parts[0] != "documents"
             or parts[1] != expected_namespace
         ):
-            raise FileNotFoundError(
-                "The requested document is unavailable."
-            )
+            raise FileNotFoundError("The requested document is unavailable.")
 
-        target = self._root.joinpath(
-            *parts
-        ).resolve(
-            strict=False
-        )
+        target = self._root.joinpath(*parts).resolve(strict=False)
 
-        if not target.is_relative_to(
-            self._root
-        ):
-            raise FileNotFoundError(
-                "The requested document is unavailable."
-            )
+        if not target.is_relative_to(self._root):
+            raise FileNotFoundError("The requested document is unavailable.")
 
         return target
 
@@ -188,13 +153,8 @@ def validate_document_id(
 ) -> None:
     """Reject identifiers that could influence filesystem paths."""
 
-    if SAFE_DOCUMENT_ID.fullmatch(
-        document_id
-    ) is None:
-        raise ValueError(
-            "Document identifier contains "
-            "unsafe characters."
-        )
+    if SAFE_DOCUMENT_ID.fullmatch(document_id) is None:
+        raise ValueError("Document identifier contains unsafe characters.")
 
 
 def build_user_namespace(
@@ -203,13 +163,9 @@ def build_user_namespace(
     """Create a stable opaque directory for one user."""
 
     if not user_id:
-        raise ValueError(
-            "Document storage requires a user identifier."
-        )
+        raise ValueError("Document storage requires a user identifier.")
 
-    digest = sha256(
-        user_id.encode("utf-8")
-    ).hexdigest()[:32]
+    digest = sha256(user_id.encode("utf-8")).hexdigest()[:32]
 
     return f"usr-{digest}"
 
@@ -222,11 +178,6 @@ def build_storage_key(
 ) -> str:
     """Build an opaque relative storage key."""
 
-    namespace = build_user_namespace(
-        user_id
-    )
+    namespace = build_user_namespace(user_id)
 
-    return (
-        f"documents/{namespace}/"
-        f"{document_id}.{document_format.value}"
-    )
+    return f"documents/{namespace}/{document_id}.{document_format.value}"

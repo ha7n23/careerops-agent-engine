@@ -17,11 +17,7 @@ def build_storage(
 ) -> local_document_storage.LocalDocumentStorage:
     """Create isolated private storage."""
 
-    return (
-        local_document_storage.LocalDocumentStorage(
-            tmp_path / "careerops-documents"
-        )
-    )
+    return local_document_storage.LocalDocumentStorage(tmp_path / "careerops-documents")
 
 
 def test_save_and_read_round_trip(
@@ -29,9 +25,7 @@ def test_save_and_read_round_trip(
 ) -> None:
     """Validated bytes should round-trip through local storage."""
 
-    storage = build_storage(
-        tmp_path
-    )
+    storage = build_storage(tmp_path)
 
     data = b"%PDF-1.7\nCareerOps CV"
 
@@ -55,9 +49,7 @@ def test_storage_key_does_not_expose_raw_user_id(
 ) -> None:
     """Storage paths should use an opaque user namespace."""
 
-    storage = build_storage(
-        tmp_path
-    )
+    storage = build_storage(tmp_path)
 
     storage_key = storage.save(
         user_id="USER-SENSITIVE-001",
@@ -67,9 +59,7 @@ def test_storage_key_does_not_expose_raw_user_id(
     )
 
     assert "USER-SENSITIVE-001" not in storage_key
-    assert storage_key.startswith(
-        "documents/usr-"
-    )
+    assert storage_key.startswith("documents/usr-")
 
 
 def test_another_user_cannot_read_document(
@@ -77,9 +67,7 @@ def test_another_user_cannot_read_document(
 ) -> None:
     """A storage key must remain bound to its owner."""
 
-    storage = build_storage(
-        tmp_path
-    )
+    storage = build_storage(tmp_path)
 
     storage_key = storage.save(
         user_id="USER-001",
@@ -103,9 +91,7 @@ def test_path_traversal_storage_key_is_rejected(
 ) -> None:
     """A supplied key cannot escape the private root."""
 
-    storage = build_storage(
-        tmp_path
-    )
+    storage = build_storage(tmp_path)
 
     with pytest.raises(
         FileNotFoundError,
@@ -122,9 +108,7 @@ def test_unsafe_document_id_is_rejected(
 ) -> None:
     """Document identifiers cannot control filesystem paths."""
 
-    storage = build_storage(
-        tmp_path
-    )
+    storage = build_storage(tmp_path)
 
     with pytest.raises(
         ValueError,
@@ -143,9 +127,7 @@ def test_delete_removes_document(
 ) -> None:
     """Deleting a document should make its bytes unavailable."""
 
-    storage = build_storage(
-        tmp_path
-    )
+    storage = build_storage(tmp_path)
 
     storage_key = storage.save(
         user_id="USER-001",
@@ -174,9 +156,7 @@ def test_duplicate_save_does_not_overwrite_existing_bytes(
 ) -> None:
     """An identifier collision must not silently replace a CV."""
 
-    storage = build_storage(
-        tmp_path
-    )
+    storage = build_storage(tmp_path)
 
     storage_key = storage.save(
         user_id="USER-001",
@@ -196,7 +176,10 @@ def test_duplicate_save_does_not_overwrite_existing_bytes(
             data=b"replacement",
         )
 
-    assert storage.read(
-        user_id="USER-001",
-        storage_key=storage_key,
-    ) == b"original"
+    assert (
+        storage.read(
+            user_id="USER-001",
+            storage_key=storage_key,
+        )
+        == b"original"
+    )
