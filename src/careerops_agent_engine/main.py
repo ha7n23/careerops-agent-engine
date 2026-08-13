@@ -1,7 +1,16 @@
 """FastAPI application entry point."""
 
 from fastapi import FastAPI
+from starlette.middleware.trustedhost import (
+    TrustedHostMiddleware,
+)
 
+from careerops_agent_engine.api.errors import (
+    register_exception_handlers,
+)
+from careerops_agent_engine.api.middleware import (
+    SecurityHeadersMiddleware,
+)
 from careerops_agent_engine.api.routers.cv_documents import (
     router as cv_documents_router,
 )
@@ -31,6 +40,17 @@ def create_app() -> FastAPI:
             "Stateful, evidence-grounded agent engine for the CareerOps platform."
         ),
     )
+
+    application.add_middleware(
+        TrustedHostMiddleware,
+        allowed_hosts=settings.trusted_hosts,
+    )
+
+    application.add_middleware(
+        SecurityHeadersMiddleware,
+    )
+
+    register_exception_handlers(application)
 
     application.include_router(health_router)
     application.include_router(job_analysis_router)

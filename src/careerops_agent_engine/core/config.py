@@ -2,8 +2,13 @@
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal, Self
 
-from pydantic import Field
+from pydantic import (
+    Field,
+    SecretStr,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -12,8 +17,29 @@ class Settings(BaseSettings):
 
     app_name: str = "CareerOps Agent Engine"
     app_version: str = "0.1.0"
-    environment: str = "development"
+    environment: Literal[
+        "development",
+        "test",
+        "staging",
+        "production",
+    ] = "development"
+
     debug: bool = False
+
+    trusted_hosts: list[str] = Field(
+        default_factory=lambda: [
+            "localhost",
+            "127.0.0.1",
+            "testserver",
+        ]
+    )
+
+    auth_mode: Literal[
+        "development",
+        "service_key",
+    ] = "development"
+
+    service_api_key: SecretStr | None = None
 
     llm_model: str = "gemini-3.5-flash"
     llm_temperature: float = Field(default=1.0, ge=0.0, le=2.0)
@@ -87,6 +113,49 @@ class Settings(BaseSettings):
         gt=0.0,
         le=300.0,
     )
+
+    @model_validator(mode="after")
+    def validate_authentication_configuration(
+        self,
+    ) -> Self:
+        """Reject unsafe authentication configuration."""
+
+        protected_environment = self.environment in {
+            "staging",
+            "production",
+        }
+
+        if protected_environment and self.debug:
+            raise ValueError("Staging and production must not enable debug mode.")
+
+        if protected_environment and "*" in self.trusted_hosts:
+            raise ValueError("Staging and production must not trust every Host header.")
+
+        if protected_environment and self.auth_mode != "service_key":
+            raise ValueError(
+                "Staging and production require service_key authentication."
+            )
+
+        if self.auth_mode == "service_key":
+            if self.service_api_key is None:
+                raise ValueError(
+                    "service_key authentication requires CAREEROPS_SERVICE_API_KEY."
+                )
+
+            secret = self.service_api_key.get_secret_value()
+
+            if len(secret) < 32:
+                raise ValueError(
+                    "CAREEROPS_SERVICE_API_KEY must contain at least 32 characters."
+                )
+
+            if secret != secret.strip():
+                raise ValueError(
+                    "CAREEROPS_SERVICE_API_KEY must not contain "
+                    "leading or trailing whitespace."
+                )
+
+        return self
 
 
 @lru_cache

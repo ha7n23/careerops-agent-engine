@@ -1,12 +1,13 @@
 """FastAPI dependency providers."""
 
 from functools import lru_cache
-from typing import Annotated
 
-from fastapi import Header, HTTPException, status
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
+from careerops_agent_engine.api.security import (
+    get_authenticated_user_id as get_authenticated_user_id,
+)
 from careerops_agent_engine.application.ports.artifact_storage import (
     ArtifactStorage,
 )
@@ -140,23 +141,6 @@ from careerops_agent_engine.infrastructure.storage.local_artifact_storage import
 from careerops_agent_engine.infrastructure.storage.local_document_storage import (
     LocalDocumentStorage,
 )
-
-
-def get_authenticated_user_id(
-    x_user_id: Annotated[
-        str | None,
-        Header(alias="X-User-ID"),
-    ] = None,
-) -> str:
-    """Return the authenticated development user identifier."""
-
-    if x_user_id is None or not x_user_id.strip():
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="The X-User-ID header is required.",
-        )
-
-    return x_user_id.strip()
 
 
 @lru_cache
