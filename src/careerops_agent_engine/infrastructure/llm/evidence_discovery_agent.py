@@ -9,6 +9,9 @@ from langchain.agents.middleware import (
     ModelCallLimitMiddleware,
     ToolCallLimitMiddleware,
 )
+from langchain.agents.middleware.model_call_limit import (
+    ModelCallLimitExceededError,
+)
 from langchain_core.messages import BaseMessage
 from langchain_core.rate_limiters import (
     BaseRateLimiter,
@@ -32,6 +35,7 @@ from careerops_agent_engine.application.services.evidence_validation import (
     validate_evidence_discovery_result,
 )
 from careerops_agent_engine.core.config import Settings
+from careerops_agent_engine.domain.enums import MatchStrength
 from careerops_agent_engine.domain.models.evidence import EvidenceMatch
 from careerops_agent_engine.domain.models.job import JobRequirement
 from careerops_agent_engine.infrastructure.llm.agent_trajectory import (
@@ -84,12 +88,12 @@ class LangChainEvidenceDiscoveryAgent:
                 ),
                 ToolCallLimitMiddleware(
                     run_limit=(settings.evidence_agent_max_tool_calls),
-                    exit_behavior="error",
+                    exit_behavior="continue",
                 ),
                 ToolCallLimitMiddleware(
                     tool_name="search_approved_evidence",
                     run_limit=(settings.evidence_agent_max_search_calls),
-                    exit_behavior="error",
+                    exit_behavior="continue",
                 ),
             ],
         )
@@ -118,40 +122,53 @@ class LangChainEvidenceDiscoveryAgent:
     ) -> EvidenceMatch:
         """Find and deterministically validate supporting evidence."""
 
-        result: dict[str, Any] = self._agent.invoke(
-            {
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": (
-                            "Analyse the following single job "
-                            "requirement.\n\n"
-                            "<job_requirement>\n"
-                            f"{requirement.model_dump_json(indent=2)}\n"
-                            "</job_requirement>"
-                        ),
-                    }
-                ]
-            },
-            context=EvidenceAgentContext(user_id=user_id),
-            config={
-                **build_langsmith_run_config(
-                    run_name=("discover_requirement_evidence"),
-                    tags=[
-                        "evidence-discovery",
-                        "tool-calling-agent",
-                        "llm",
-                    ],
-                    metadata={
-                        "component": ("evidence_discovery_agent"),
-                        "requirement_id": (requirement.requirement_id),
-                        "prompt_version": (PROMPT_VERSION),
-                        "ls_model_name": (self._model_name),
-                    },
+        try:
+            result: dict[str, Any] = self._agent.invoke(
+                {
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": (
+                                "Analyse the following single job "
+                                "requirement.\n\n"
+                                "<job_requirement>\n"
+                                f"{requirement.model_dump_json(indent=2)}\n"
+                                "</job_requirement>"
+                            ),
+                        }
+                    ]
+                },
+                context=EvidenceAgentContext(user_id=user_id),
+                config={
+                    **build_langsmith_run_config(
+                        run_name="discover_requirement_evidence",
+                        tags=[
+                            "evidence-discovery",
+                            "tool-calling-agent",
+                            "llm",
+                        ],
+                        metadata={
+                            "component": "evidence_discovery_agent",
+                            "requirement_id": requirement.requirement_id,
+                            "prompt_version": PROMPT_VERSION,
+                            "ls_model_name": self._model_name,
+                        },
+                    ),
+                    "recursion_limit": self._recursion_limit,
+                },
+            )
+        except ModelCallLimitExceededError:
+            return EvidenceMatch(
+                requirement_id=requirement.requirement_id,
+                match_strength=MatchStrength.NONE,
+                direct_evidence_ids=[],
+                related_evidence_ids=[],
+                explanation=(
+                    "Evidence discovery reached its bounded model-call limit "
+                    "before a supported match could be completed."
                 ),
-                "recursion_limit": (self._recursion_limit),
-            },
-        )
+                gap=True,
+            )
 
         match = EvidenceMatch.model_validate(result.get("structured_response"))
 

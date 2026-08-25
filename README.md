@@ -191,3 +191,16 @@ These boundaries keep the project focused on the harder AI-engineering concerns:
 ## Detailed architecture
 
 See **[docs/architecture.md](docs/ARCHITECTURE.md)** for the graph topology, evidence trust boundary, persistence model, document pipeline, observability/evaluation design, security model, and extension points.
+
+## Project updates
+
+### 2026-08-25 — Integration and resilience hardening
+
+- Switched the current MVP default LLM to `gemini-3.5-flash-lite` for more practical development throughput while keeping the provider boundary replaceable.
+- Hardened bounded evidence discovery so tool-call limits stop excess calls without crashing the workflow.
+- Added fail-closed handling for exhausted model-call budgets: unsupported evidence discovery now returns an explicit gap rather than propagating an HTTP 500.
+- Isolated pytest configuration from developer-local authentication settings so the deterministic suite behaves consistently across environments.
+- Added regression coverage for bounded evidence-discovery failure handling.
+- Successfully validated authenticated service-to-service job analysis from the separate CareerOps Automation & MCP Hub over the public HTTP API.
+
+Current quality baseline: **377 passed, 8 skipped**, Ruff clean, strict mypy clean across **147 source files**.

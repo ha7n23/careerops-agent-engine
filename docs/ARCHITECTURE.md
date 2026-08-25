@@ -437,7 +437,7 @@ Cloud deployment is deliberately deferred. The project proves deployment readine
 
 ## 15. Testing strategy
 
-The current verified baseline is **376 passed, 8 skipped**.
+The current verified baseline is **377 passed, 8 skipped**.
 
 The suite covers:
 
@@ -486,3 +486,23 @@ CareerOps Agent Engine is designed to demonstrate practical AI engineering rathe
 - testing, static analysis, containerisation, database migrations, health checks, and CI integration.
 
 The result is an AI backend where **model capability is useful, but model output is never the only source of trust**.
+
+## 18. Implementation updates
+
+### 2026-08-25 — Bounded-agent resilience and cross-service validation
+
+Evidence discovery now treats configured tool-call budgets as controlled stopping boundaries rather than workflow-fatal conditions. Both the overall tool budget and the evidence-search-specific budget prevent additional calls while allowing the agent to complete from already-observed information.
+
+The model-call budget remains a hard safety boundary. If evidence discovery exhausts that budget before producing a supported result, the adapter fails closed by returning an explicit `MatchStrength.NONE` result with `gap=True` and no evidence identifiers. This preserves grounding guarantees while preventing a bounded agent run from becoming an unhandled API failure.
+
+The current MVP model default is `gemini-3.5-flash-lite`. Model selection remains environment-driven and the surrounding architecture preserves provider replacement seams.
+
+Test configuration is isolated from developer-local authentication settings, preventing a local `service_key` runtime configuration from changing deterministic API-test behaviour.
+
+The Agent Engine has also been validated as a real service boundary from the separate CareerOps Automation & MCP Hub using authenticated HTTP, user scoping, the production FastAPI contract, PostgreSQL-backed execution, LangGraph, and a live LLM workflow.
+
+Verified baseline after these changes:
+
+- **377 passed, 8 skipped**
+- Ruff formatting and linting clean
+- strict mypy clean across **147 source files**
