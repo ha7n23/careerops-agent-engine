@@ -964,3 +964,44 @@ def test_regeneration_returns_to_human_review_before_approval(
         "awaiting_review",
         "completed",
     ]
+
+
+def test_job_analysis_can_be_recovered_while_awaiting_review(
+    client: TestClient,
+) -> None:
+    """Paused analysis should be fully recoverable from durable state."""
+
+    paused = start_reviewable_analysis(
+        client,
+        job_id="JOB-API-RECOVER",
+    )
+
+    response = client.get(
+        f"/api/v1/job-analysis/{paused['thread_id']}",
+        headers={
+            "X-User-ID": "USER-API-001",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == paused
+
+
+def test_other_user_cannot_recover_job_analysis(
+    client: TestClient,
+) -> None:
+    """A user must not recover another user's durable analysis."""
+
+    paused = start_reviewable_analysis(
+        client,
+        job_id="JOB-API-RECOVER-CROSS-USER",
+    )
+
+    response = client.get(
+        f"/api/v1/job-analysis/{paused['thread_id']}",
+        headers={
+            "X-User-ID": "USER-OTHER",
+        },
+    )
+
+    assert response.status_code == 404

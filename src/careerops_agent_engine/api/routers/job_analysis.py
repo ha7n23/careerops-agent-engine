@@ -224,6 +224,33 @@ def analyse_job(
     return build_job_analysis_response(execution)
 
 
+@router.get(
+    "/{thread_id}",
+    response_model=JobAnalysisResponse,
+    summary="Get job analysis",
+    status_code=status.HTTP_200_OK,
+)
+def get_job_analysis(
+    thread_id: str,
+    service: JobAnalysisServiceDependency,
+    user_id: AuthenticatedUserIdDependency,
+) -> JobAnalysisResponse:
+    """Recover one durable user-owned job-analysis thread."""
+
+    try:
+        execution = service.get_analysis(
+            thread_id=thread_id,
+            user_id=user_id,
+        )
+    except JobAnalysisThreadUnavailableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+
+    return build_job_analysis_response(execution)
+
+
 @router.post(
     "/{thread_id}/review",
     response_model=JobAnalysisResponse,

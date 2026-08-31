@@ -225,6 +225,69 @@ class JobAnalysisService:
 
         return execution
 
+    def get_analysis(
+        self,
+        *,
+        thread_id: str,
+        user_id: str,
+    ) -> JobAnalysisExecutionResult:
+        """Recover one durable job-analysis thread without advancing it."""
+
+        persisted_run = self._audit_repository.get_run(
+            user_id=user_id,
+            thread_id=thread_id,
+        )
+        if persisted_run is None:
+            raise JobAnalysisThreadUnavailableError(
+                "The requested job-analysis thread is unavailable."
+            )
+
+        config: RunnableConfig = {
+            "configurable": {
+                "thread_id": thread_id,
+            }
+        }
+
+        with self._checkpointer_factory() as checkpointer:
+            graph = self._build_graph(checkpointer)
+            snapshot = graph.get_state(config)
+
+        snapshot_values = cast(
+            dict[str, Any],
+            snapshot.values,
+        )
+
+        if not snapshot_values or snapshot_values.get("user_id") != user_id:
+            raise JobAnalysisThreadUnavailableError(
+                "The requested job-analysis thread is unavailable."
+            )
+
+        interrupt_payload: dict[str, object] | None = None
+
+        if snapshot.interrupts:
+            if len(snapshot.interrupts) != 1:
+                raise RuntimeError(
+                    "CareerOps found multiple unresolved job-analysis interrupts."
+                )
+
+            interrupt_value = snapshot.interrupts[0].value
+
+            if not isinstance(interrupt_value, dict):
+                raise RuntimeError(
+                    "CareerOps found an invalid job-analysis interrupt payload."
+                )
+
+            interrupt_payload = cast(
+                dict[str, object],
+                interrupt_value,
+            )
+
+        return JobAnalysisExecutionResult(
+            thread_id=thread_id,
+            state=cast(JobAnalysisState, snapshot_values),
+            interrupt_payload=interrupt_payload,
+        )
+
     def _build_graph(
         self,
         checkpointer: BaseCheckpointSaver[str],
