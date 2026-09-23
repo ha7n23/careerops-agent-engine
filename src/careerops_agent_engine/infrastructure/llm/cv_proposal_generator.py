@@ -1,13 +1,10 @@
-"""Gemini implementation of grounded CV proposal generation."""
+"""LangChain implementation of grounded CV proposal generation."""
 
 import json
 from collections.abc import Sequence
 from typing import Any
 
-from langchain_core.rate_limiters import (
-    BaseRateLimiter,
-)
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.language_models.chat_models import BaseChatModel
 
 from careerops_agent_engine.agents.prompts.cv_proposal import (
     CV_PROPOSAL_PROMPT,
@@ -32,34 +29,21 @@ from careerops_agent_engine.infrastructure.observability.langsmith import (
 )
 
 
-class GoogleCVProposalGenerator:
-    """Generate grounded CV proposals using Gemini."""
+class LangChainCVProposalGenerator:
+    """Generate grounded CV proposals with a configured chat model."""
 
     def __init__(
         self,
         *,
+        model: BaseChatModel,
         model_name: str,
-        temperature: float,
-        timeout_seconds: float,
-        max_retries: int,
-        rate_limiter: BaseRateLimiter | None = None,
     ) -> None:
-        """Initialise the structured-output model."""
-
-        model = ChatGoogleGenerativeAI(
-            model=model_name,
-            temperature=temperature,
-            timeout=timeout_seconds,
-            max_retries=max_retries,
-            thinking_level="minimal",
-            rate_limiter=rate_limiter,
-        )
+        """Initialise provider-neutral structured output."""
 
         self._structured_model = model.with_structured_output(
             schema=GeneratedCVProposalContent.model_json_schema(),
             method="json_schema",
         )
-
         self._model_name = model_name
 
     def generate(
@@ -144,7 +128,7 @@ class GoogleCVProposalGenerator:
         requirement: JobRequirement,
         prompt_version: str,
     ) -> GeneratedCVProposalContent:
-        """Invoke Gemini and validate structured content."""
+        """Invoke the configured model and validate structured content."""
 
         raw_result: Any = self._structured_model.invoke(
             messages,
@@ -170,7 +154,7 @@ class GoogleCVProposalGenerator:
 def build_evidence_context(
     approved_evidence: Sequence[CareerEvidence],
 ) -> list[ProposalEvidenceContext]:
-    """Build the minimal approved context exposed to Gemini."""
+    """Build the minimal approved context exposed to the model."""
 
     return [
         ProposalEvidenceContext(

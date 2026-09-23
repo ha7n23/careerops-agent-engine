@@ -1,14 +1,9 @@
-"""Gemini implementation of structured CV evidence extraction."""
+"""LangChain implementation of structured CV evidence extraction."""
 
 import json
 from typing import Any
 
-from langchain_core.rate_limiters import (
-    BaseRateLimiter,
-)
-from langchain_google_genai import (
-    ChatGoogleGenerativeAI,
-)
+from langchain_core.language_models.chat_models import BaseChatModel
 
 from careerops_agent_engine.agents.prompts.cv_evidence_extraction import (
     CV_EVIDENCE_EXTRACTION_PROMPT,
@@ -28,34 +23,21 @@ from careerops_agent_engine.infrastructure.observability.langsmith import (
 )
 
 
-class GoogleCVEvidenceExtractor:
-    """Extract pending evidence candidates using Gemini."""
+class LangChainCVEvidenceExtractor:
+    """Extract pending evidence candidates with a configured chat model."""
 
     def __init__(
         self,
         *,
+        model: BaseChatModel,
         model_name: str,
-        temperature: float,
-        timeout_seconds: float,
-        max_retries: int,
-        rate_limiter: BaseRateLimiter | None = None,
     ) -> None:
-        """Initialise Gemini structured output."""
-
-        model = ChatGoogleGenerativeAI(
-            model=model_name,
-            temperature=temperature,
-            timeout=timeout_seconds,
-            max_retries=max_retries,
-            thinking_level="minimal",
-            rate_limiter=rate_limiter,
-        )
+        """Initialise provider-neutral structured output."""
 
         self._structured_model = model.with_structured_output(
-            schema=(ExtractedCareerEvidenceSet.model_json_schema()),
+            schema=ExtractedCareerEvidenceSet.model_json_schema(),
             method="json_schema",
         )
-
         self._model_name = model_name
 
     def extract(
@@ -85,7 +67,7 @@ class GoogleCVEvidenceExtractor:
         raw_result: Any = self._structured_model.invoke(
             messages,
             config=build_langsmith_run_config(
-                run_name=("extract_cv_evidence_candidates"),
+                run_name="extract_cv_evidence_candidates",
                 tags=[
                     "cv-ingestion",
                     "evidence-extraction",
@@ -93,10 +75,10 @@ class GoogleCVEvidenceExtractor:
                     "llm",
                 ],
                 metadata={
-                    "component": ("cv_evidence_extractor"),
-                    "document_id": (document.document_id),
-                    "prompt_version": (PROMPT_VERSION),
-                    "ls_model_name": (self._model_name),
+                    "component": "cv_evidence_extractor",
+                    "document_id": document.document_id,
+                    "prompt_version": PROMPT_VERSION,
+                    "ls_model_name": self._model_name,
                 },
             ),
         )
@@ -108,7 +90,7 @@ class GoogleCVEvidenceExtractor:
                 category=candidate.category,
                 title=candidate.title,
                 source_section_order_index=(candidate.source_section_order_index),
-                source_excerpt=(candidate.source_excerpt),
+                source_excerpt=candidate.source_excerpt,
                 technologies=list(candidate.technologies),
                 capabilities=list(candidate.capabilities),
                 claims=list(candidate.claims),

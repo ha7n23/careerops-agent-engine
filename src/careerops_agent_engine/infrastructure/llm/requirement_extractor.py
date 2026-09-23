@@ -1,11 +1,8 @@
-"""Gemini implementation of structured requirement extraction."""
+"""LangChain implementation of structured requirement extraction."""
 
 from typing import Any
 
-from langchain_core.rate_limiters import (
-    BaseRateLimiter,
-)
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.language_models.chat_models import BaseChatModel
 
 from careerops_agent_engine.agents.prompts.job_requirements import (
     JOB_REQUIREMENT_PROMPT,
@@ -23,28 +20,16 @@ from careerops_agent_engine.infrastructure.observability.langsmith import (
 )
 
 
-class GoogleRequirementExtractor:
-    """Extract job requirements using Gemini structured output."""
+class LangChainRequirementExtractor:
+    """Extract job requirements using provider-neutral structured output."""
 
     def __init__(
         self,
         *,
+        model: BaseChatModel,
         model_name: str,
-        temperature: float,
-        timeout_seconds: float,
-        max_retries: int,
-        rate_limiter: BaseRateLimiter | None = None,
     ) -> None:
-        """Initialise the provider adapter."""
-
-        model = ChatGoogleGenerativeAI(
-            model=model_name,
-            temperature=temperature,
-            timeout=timeout_seconds,
-            max_retries=max_retries,
-            thinking_level="minimal",
-            rate_limiter=rate_limiter,
-        )
+        """Initialise the structured-output adapter."""
 
         self._structured_model = model.with_structured_output(
             schema=ExtractedRequirementSet.model_json_schema(),
@@ -67,7 +52,7 @@ class GoogleRequirementExtractor:
         raw_result: Any = self._structured_model.invoke(
             messages,
             config=build_langsmith_run_config(
-                run_name=("extract_job_requirements"),
+                run_name="extract_job_requirements",
                 tags=[
                     "job-analysis",
                     "requirement-extraction",
@@ -75,9 +60,9 @@ class GoogleRequirementExtractor:
                     "llm",
                 ],
                 metadata={
-                    "component": ("requirement_extractor"),
-                    "prompt_version": (PROMPT_VERSION),
-                    "ls_model_name": (self._model_name),
+                    "component": "requirement_extractor",
+                    "prompt_version": PROMPT_VERSION,
+                    "ls_model_name": self._model_name,
                 },
             ),
         )

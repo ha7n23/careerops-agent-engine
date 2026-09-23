@@ -12,11 +12,8 @@ from langchain.agents.middleware import (
 from langchain.agents.middleware.model_call_limit import (
     ModelCallLimitExceededError,
 )
+from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import BaseMessage
-from langchain_core.rate_limiters import (
-    BaseRateLimiter,
-)
-from langchain_google_genai import ChatGoogleGenerativeAI
 
 from careerops_agent_engine.agents.prompts.evidence_discovery import (
     EVIDENCE_DISCOVERY_SYSTEM_PROMPT,
@@ -54,18 +51,10 @@ class LangChainEvidenceDiscoveryAgent:
         *,
         repository: EvidenceRepository,
         settings: Settings,
-        rate_limiter: BaseRateLimiter | None = None,
+        model: BaseChatModel,
+        model_name: str,
     ) -> None:
-        """Create the model, tools and bounded agent harness."""
-
-        model = ChatGoogleGenerativeAI(
-            model=settings.llm_model,
-            temperature=settings.llm_temperature,
-            timeout=settings.llm_timeout_seconds,
-            max_retries=settings.llm_max_retries,
-            thinking_level="low",
-            rate_limiter=rate_limiter,
-        )
+        """Create the tools and bounded agent harness."""
 
         tools = create_evidence_tools(repository)
 
@@ -112,7 +101,7 @@ class LangChainEvidenceDiscoveryAgent:
 
         self._repository = repository
         self._recursion_limit = settings.evidence_agent_recursion_limit
-        self._model_name = settings.llm_model
+        self._model_name = model_name
 
     def discover(
         self,

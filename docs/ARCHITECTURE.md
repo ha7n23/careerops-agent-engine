@@ -33,7 +33,7 @@ flowchart TB
         Eval[Evaluation + observability]
     end
 
-    Gemini[Google Gemini]
+    LLM[Configured LLM provider]
     Smith[LangSmith]
     DB[(PostgreSQL)]
     Files[(Private document/artifact storage)]
@@ -44,14 +44,14 @@ flowchart TB
     App --> Graph
     App --> Domain
     Graph --> Domain
-    Graph --> Gemini
-    App --> Gemini
+    Graph --> LLM
+    App --> LLM
     Graph --> DB
     App --> DB
     App --> Files
     App --> LO
     Graph --> Smith
-    Eval --> Gemini
+    Eval --> LLM
     Eval --> Smith
 ```
 
@@ -62,11 +62,13 @@ flowchart TB
 | `domain/` | Strict Pydantic business models, enums, invariants, approval semantics |
 | `application/` | Use cases and orchestration; depends on ports rather than concrete infrastructure |
 | `agents/` | LangGraph topology, graph state, nodes, prompts, runtime context, tools |
-| `infrastructure/` | Gemini/LangChain adapters, PostgreSQL repositories, checkpoints, file storage, DOCX/PDF infrastructure, LangSmith configuration |
+| `infrastructure/` | Provider-neutral LangChain adapters and model construction, PostgreSQL repositories, checkpoints, file storage, DOCX/PDF infrastructure, LangSmith configuration |
 | `api/` | FastAPI transport, request/response contracts, dependency composition, auth, HTTP security |
 | `evaluation/` | Versioned benchmark loading, deterministic scoring, resumable runs, LangSmith dataset/experiment integration |
 
 The dependency wiring lives in `api/dependencies.py`, where concrete adapters are composed behind application ports. This keeps the core use cases replaceable: LLM providers, repositories, storage, renderers, and converters are infrastructure choices rather than domain assumptions.
+
+Provider-specific SDK construction is isolated in `infrastructure/llm/model_factory.py`. Requirement extraction, CV evidence extraction, proposal generation, claim verification, and tool-calling evidence discovery receive LangChain’s provider-neutral `BaseChatModel` interface.
 
 ## 2. Trust flow: from untrusted CV to verified artifacts
 
@@ -461,7 +463,7 @@ The architecture intentionally leaves several adapters replaceable:
 
 | Current choice | Extension path |
 | --- | --- |
-| Google Gemini | Add another provider behind the existing LLM/application ports |
+| Google Gemini through the provider-neutral model factory | Add Groq or another provider without changing application services or workflow logic |
 | Local document/artifact storage | Replace with S3/blob storage adapter without changing use cases |
 | Native PDF/DOCX extraction | Add OCR fallback for scanned/image-only documents |
 | `careerops-standard` one-column template | Add multiple versioned renderers/templates |
@@ -503,6 +505,6 @@ The Agent Engine has also been validated as a real service boundary from the sep
 
 Verified baseline after these changes:
 
-- **377 passed, 8 skipped**
+- **386 passed, 8 skipped**
 - Ruff formatting and linting clean
-- strict mypy clean across **147 source files**
+- Strict mypy currently checks **148 source files**; Ruff covers `src` and `tests`.

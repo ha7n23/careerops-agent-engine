@@ -1,13 +1,10 @@
-"""Gemini implementation of strict CV claim verification."""
+"""LangChain implementation of strict CV claim verification."""
 
 import json
 from collections.abc import Sequence
 from typing import Any
 
-from langchain_core.rate_limiters import (
-    BaseRateLimiter,
-)
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.language_models.chat_models import BaseChatModel
 
 from careerops_agent_engine.agents.prompts.cv_claim_verification import (
     CV_CLAIM_VERIFICATION_PROMPT,
@@ -32,34 +29,21 @@ from careerops_agent_engine.infrastructure.observability.langsmith import (
 )
 
 
-class GoogleCVClaimVerifier:
-    """Verify generated CV claims against approved evidence."""
+class LangChainCVClaimVerifier:
+    """Verify generated CV claims with a configured chat model."""
 
     def __init__(
         self,
         *,
+        model: BaseChatModel,
         model_name: str,
-        temperature: float,
-        timeout_seconds: float,
-        max_retries: int,
-        rate_limiter: BaseRateLimiter | None = None,
     ) -> None:
-        """Initialise the structured verification model."""
-
-        model = ChatGoogleGenerativeAI(
-            model=model_name,
-            temperature=temperature,
-            timeout=timeout_seconds,
-            max_retries=max_retries,
-            thinking_level="minimal",
-            rate_limiter=rate_limiter,
-        )
+        """Initialise provider-neutral structured output."""
 
         self._structured_model = model.with_structured_output(
             schema=GeneratedClaimVerification.model_json_schema(),
             method="json_schema",
         )
-
         self._model_name = model_name
 
     def verify(

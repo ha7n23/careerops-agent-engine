@@ -23,23 +23,27 @@ from careerops_agent_engine.application.ports.requirement_extractor import (
     RequirementExtractor,
 )
 from careerops_agent_engine.core.config import Settings, get_settings
+from careerops_agent_engine.infrastructure.llm.cv_claim_verifier import (
+    LangChainCVClaimVerifier,
+)
+from careerops_agent_engine.infrastructure.llm.cv_evidence_extractor import (
+    LangChainCVEvidenceExtractor,
+)
+from careerops_agent_engine.infrastructure.llm.cv_proposal_generator import (
+    LangChainCVProposalGenerator,
+)
 from careerops_agent_engine.infrastructure.llm.evidence_discovery_agent import (
     LangChainEvidenceDiscoveryAgent,
 )
-from careerops_agent_engine.infrastructure.llm.google_cv_claim_verifier import (
-    GoogleCVClaimVerifier,
-)
-from careerops_agent_engine.infrastructure.llm.google_cv_evidence_extractor import (
-    GoogleCVEvidenceExtractor,
-)
-from careerops_agent_engine.infrastructure.llm.google_cv_proposal_generator import (
-    GoogleCVProposalGenerator,
-)
-from careerops_agent_engine.infrastructure.llm.google_requirement_extractor import (
-    GoogleRequirementExtractor,
+from careerops_agent_engine.infrastructure.llm.model_factory import (
+    ChatModelProfile,
+    create_chat_model,
 )
 from careerops_agent_engine.infrastructure.llm.rate_limiting import (
     get_shared_llm_rate_limiter,
+)
+from careerops_agent_engine.infrastructure.llm.requirement_extractor import (
+    LangChainRequirementExtractor,
 )
 
 
@@ -59,13 +63,16 @@ def create_requirement_extractor(
     """Create the configured requirement-extraction adapter."""
 
     resolved_settings = settings or get_settings()
+    rate_limiter = _get_rate_limiter(resolved_settings)
+    model = create_chat_model(
+        settings=resolved_settings,
+        profile=ChatModelProfile.STRUCTURED_OUTPUT,
+        rate_limiter=rate_limiter,
+    )
 
-    return GoogleRequirementExtractor(
+    return LangChainRequirementExtractor(
+        model=model,
         model_name=resolved_settings.llm_model,
-        temperature=resolved_settings.llm_temperature,
-        timeout_seconds=resolved_settings.llm_timeout_seconds,
-        max_retries=resolved_settings.llm_max_retries,
-        rate_limiter=(_get_rate_limiter(resolved_settings)),
     )
 
 
@@ -76,11 +83,18 @@ def create_evidence_discovery_runner(
     """Create the configured approved-evidence discovery agent."""
 
     resolved_settings = settings or get_settings()
+    rate_limiter = _get_rate_limiter(resolved_settings)
+    model = create_chat_model(
+        settings=resolved_settings,
+        profile=ChatModelProfile.TOOL_CALLING,
+        rate_limiter=rate_limiter,
+    )
 
     return LangChainEvidenceDiscoveryAgent(
         repository=repository,
         settings=resolved_settings,
-        rate_limiter=(_get_rate_limiter(resolved_settings)),
+        model=model,
+        model_name=resolved_settings.llm_model,
     )
 
 
@@ -90,13 +104,16 @@ def create_cv_proposal_generator(
     """Create the configured CV proposal generator."""
 
     resolved_settings = settings or get_settings()
+    rate_limiter = _get_rate_limiter(resolved_settings)
+    model = create_chat_model(
+        settings=resolved_settings,
+        profile=ChatModelProfile.STRUCTURED_OUTPUT,
+        rate_limiter=rate_limiter,
+    )
 
-    return GoogleCVProposalGenerator(
+    return LangChainCVProposalGenerator(
+        model=model,
         model_name=resolved_settings.llm_model,
-        temperature=resolved_settings.llm_temperature,
-        timeout_seconds=resolved_settings.llm_timeout_seconds,
-        max_retries=resolved_settings.llm_max_retries,
-        rate_limiter=(_get_rate_limiter(resolved_settings)),
     )
 
 
@@ -106,13 +123,16 @@ def create_cv_claim_verifier(
     """Create the configured CV claim-verification adapter."""
 
     resolved_settings = settings or get_settings()
+    rate_limiter = _get_rate_limiter(resolved_settings)
+    model = create_chat_model(
+        settings=resolved_settings,
+        profile=ChatModelProfile.STRUCTURED_OUTPUT,
+        rate_limiter=rate_limiter,
+    )
 
-    return GoogleCVClaimVerifier(
+    return LangChainCVClaimVerifier(
+        model=model,
         model_name=resolved_settings.llm_model,
-        temperature=resolved_settings.llm_temperature,
-        timeout_seconds=resolved_settings.llm_timeout_seconds,
-        max_retries=resolved_settings.llm_max_retries,
-        rate_limiter=(_get_rate_limiter(resolved_settings)),
     )
 
 
@@ -122,11 +142,14 @@ def create_cv_evidence_extractor(
     """Create the configured CV evidence extractor."""
 
     resolved_settings = settings or get_settings()
+    rate_limiter = _get_rate_limiter(resolved_settings)
+    model = create_chat_model(
+        settings=resolved_settings,
+        profile=ChatModelProfile.STRUCTURED_OUTPUT,
+        rate_limiter=rate_limiter,
+    )
 
-    return GoogleCVEvidenceExtractor(
+    return LangChainCVEvidenceExtractor(
+        model=model,
         model_name=resolved_settings.llm_model,
-        temperature=(resolved_settings.llm_temperature),
-        timeout_seconds=(resolved_settings.llm_timeout_seconds),
-        max_retries=(resolved_settings.llm_max_retries),
-        rate_limiter=(_get_rate_limiter(resolved_settings)),
     )
