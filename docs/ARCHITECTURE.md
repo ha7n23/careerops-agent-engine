@@ -439,7 +439,7 @@ Cloud deployment is deliberately deferred. The project proves deployment readine
 
 ## 15. Testing strategy
 
-The current verified baseline is **377 passed, 8 skipped**.
+The current verified baseline is **406 passed, 9 skipped**.
 
 The suite covers:
 
@@ -453,9 +453,9 @@ The suite covers:
 - deterministic evaluation and LangSmith dataset/experiment contracts;
 - end-to-end CV/job-analysis/document integration paths.
 
-The eight default skips are explicit live LLM or live document-runtime tests gated behind environment flags. This keeps ordinary CI deterministic while retaining opt-in real-provider/runtime proofs.
+The nine default skips are explicit live LLM or live document-runtime tests gated behind environment flags. This keeps ordinary CI deterministic while retaining opt-in real-provider/runtime proofs.
 
-Strict mypy currently checks **147 source files**; Ruff covers `src` and `tests`.
+Strict mypy currently checks **149 source files**; Ruff covers `src` and `tests`.
 
 ## 16. Trade-offs and extension points
 
@@ -505,6 +505,6 @@ The Agent Engine has also been validated as a real service boundary from the sep
 
 Verified baseline after these changes:
 
-- **406 passed, 9 skipped**
+- **396 passed, 8 skipped**
 - Ruff formatting and linting clean
-- Strict mypy currently checks **149 source files**; Ruff covers `src` and `tests`.
+- Strict mypy currently checks **148 source files**; Ruff covers `src` and `tests`.
