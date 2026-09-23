@@ -4,7 +4,7 @@
 
 **Stateful, evidence-grounded AI backend for analysing jobs, matching approved career evidence, reviewing CV changes, and generating verified DOCX/PDF CV versions.**
 
-CareerOps Agent Engine is a portfolio-grade AI engineering project built around a simple rule: **LLMs can reason and propose, but trusted state changes must be grounded, validated, persisted, and human-approved.** It combines LangGraph, LangChain, LangSmith, provider-neutral LLM adapters currently backed by Google Gemini, FastAPI, PostgreSQL, deterministic document processing, Docker, and CI into one durable workflow.
+CareerOps Agent Engine is a portfolio-grade AI engineering project built around a simple rule: **LLMs can reason and propose, but trusted state changes must be grounded, validated, persisted, and human-approved.** It combines LangGraph, LangChain, LangSmith, provider-neutral LLM adapters supporting Google Gemini and Groq, FastAPI, PostgreSQL, deterministic document processing, Docker, and CI into one durable workflow.
 
 ## 30-second summary
 
@@ -12,7 +12,7 @@ CareerOps Agent Engine is a portfolio-grade AI engineering project built around 
 - **Job-analysis graph:** extract requirements, use a bounded tool-calling agent to discover approved evidence, calculate a deterministic fit score, generate grounded CV proposals, verify factual claims, and pause for human review.
 - **Verified document output:** apply accepted changes to a structured CV, create an immutable version, render an ATS-friendly DOCX, convert it to PDF with LibreOffice, and deterministically verify both artifacts before download.
 - **Production-style engineering:** PostgreSQL persistence and LangGraph checkpoints, LangSmith tracing/evaluation with privacy masking, FastAPI security boundaries, Dockerised runtime, Alembic migrations, and GitHub Actions container integration.
-- **Current quality baseline:** **386 passing tests**, **8 opt-in live integration tests skipped by default**, Ruff clean, and strict mypy checks across **148 source files**.
+- **Current quality baseline:** **396 passing tests**, **8 opt-in live integration tests skipped by default**, Ruff clean, and strict mypy checks across **148 source files**.
 
 > For the deeper design, trust boundaries, workflow states, persistence model, and trade-offs, see [Architecture](docs/ARCHITECTURE.md).
 
@@ -109,11 +109,11 @@ Interactive OpenAPI documentation is available from FastAPI at `/docs` when the 
 
 ### Docker-first
 
-Requirements: Docker with Compose. The currently enabled Google provider requires a Gemini API key only for live LLM workflows.
+Requirements: Docker with Compose. Live Google workflows require `GOOGLE_API_KEY`; live Groq workflows require `GROQ_API_KEY`. Google remains the default provider until Groq live validation and evaluation pass.
 
 ```bash
 cp .env.example .env
-# Add GOOGLE_API_KEY to .env for live AI operations.
+# Add the API key for your selected live LLM provider.
 
 docker compose up --build -d
 ```
@@ -140,6 +140,8 @@ uv run ruff check .
 uv run python -m mypy src
 uv run pytest
 ```
+
+Groq can be enabled explicitly with `CAREEROPS_LLM_PROVIDER="groq"`. Optional fast, quality, and tool-calling model settings allow deterministic task routing while falling back to `CAREEROPS_LLM_MODEL` when an override is unset.
 
 Live LLM-provider and LibreOffice integration tests are opt-in through `RUN_LIVE_LLM_TESTS=true` and `RUN_LIVE_DOCUMENT_TESTS=true` so the default suite stays deterministic and CI-friendly.
 

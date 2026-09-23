@@ -14,23 +14,36 @@ from careerops_agent_engine.infrastructure.llm.model_factory import (
 
 
 @pytest.mark.parametrize(
-    ("factory_name", "adapter_name"),
+    (
+        "factory_name",
+        "adapter_name",
+        "expected_profile",
+        "expected_model",
+    ),
     [
         (
             "create_requirement_extractor",
             "LangChainRequirementExtractor",
+            ChatModelProfile.FAST_STRUCTURED_OUTPUT,
+            "fast-model",
         ),
         (
             "create_cv_evidence_extractor",
             "LangChainCVEvidenceExtractor",
+            ChatModelProfile.FAST_STRUCTURED_OUTPUT,
+            "fast-model",
         ),
         (
             "create_cv_proposal_generator",
             "LangChainCVProposalGenerator",
+            ChatModelProfile.QUALITY_STRUCTURED_OUTPUT,
+            "quality-model",
         ),
         (
             "create_cv_claim_verifier",
             "LangChainCVClaimVerifier",
+            ChatModelProfile.QUALITY_STRUCTURED_OUTPUT,
+            "quality-model",
         ),
     ],
 )
@@ -38,12 +51,16 @@ def test_structured_adapter_factory_uses_neutral_model(
     monkeypatch: pytest.MonkeyPatch,
     factory_name: str,
     adapter_name: str,
+    expected_profile: ChatModelProfile,
+    expected_model: str,
 ) -> None:
-    """Structured adapters should receive the configured neutral model."""
+    """Structured adapters should receive their configured model profile."""
 
     settings = Settings(
-        llm_provider="google",
-        llm_model="gemini-test",
+        llm_model="default-model",
+        llm_fast_model="fast-model",
+        llm_quality_model="quality-model",
+        llm_tool_model="tool-model",
     )
     fake_model = Mock(spec=BaseChatModel)
     fake_adapter = object()
@@ -73,15 +90,18 @@ def test_structured_adapter_factory_uses_neutral_model(
     created_adapter = create_adapter(settings)
 
     assert created_adapter is fake_adapter
-    limiter_factory.assert_called_once_with(settings)
+    limiter_factory.assert_called_once_with(
+        settings,
+        expected_profile,
+    )
     model_factory.assert_called_once_with(
         settings=settings,
-        profile=ChatModelProfile.STRUCTURED_OUTPUT,
+        profile=expected_profile,
         rate_limiter=rate_limiter,
     )
     adapter_factory.assert_called_once_with(
         model=fake_model,
-        model_name="gemini-test",
+        model_name=expected_model,
     )
 
 
@@ -91,8 +111,10 @@ def test_evidence_agent_factory_uses_tool_calling_model(
     """The evidence agent should receive the tool-calling model profile."""
 
     settings = Settings(
-        llm_provider="google",
-        llm_model="gemini-test",
+        llm_model="default-model",
+        llm_fast_model="fast-model",
+        llm_quality_model="quality-model",
+        llm_tool_model="tool-model",
     )
     repository = Mock()
     fake_model = Mock(spec=BaseChatModel)
@@ -125,7 +147,10 @@ def test_evidence_agent_factory_uses_tool_calling_model(
     )
 
     assert created_agent is fake_agent
-    limiter_factory.assert_called_once_with(settings)
+    limiter_factory.assert_called_once_with(
+        settings,
+        ChatModelProfile.TOOL_CALLING,
+    )
     model_factory.assert_called_once_with(
         settings=settings,
         profile=ChatModelProfile.TOOL_CALLING,
@@ -135,5 +160,5 @@ def test_evidence_agent_factory_uses_tool_calling_model(
         repository=repository,
         settings=settings,
         model=fake_model,
-        model_name="gemini-test",
+        model_name="tool-model",
     )

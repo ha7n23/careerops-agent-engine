@@ -38,6 +38,7 @@ from careerops_agent_engine.infrastructure.llm.evidence_discovery_agent import (
 from careerops_agent_engine.infrastructure.llm.model_factory import (
     ChatModelProfile,
     create_chat_model,
+    resolve_model_name,
 )
 from careerops_agent_engine.infrastructure.llm.rate_limiting import (
     get_shared_llm_rate_limiter,
@@ -49,11 +50,17 @@ from careerops_agent_engine.infrastructure.llm.requirement_extractor import (
 
 def _get_rate_limiter(
     settings: Settings,
+    profile: ChatModelProfile,
 ) -> BaseRateLimiter:
-    """Return the shared model limiter for this process."""
+    """Return the shared limiter for one provider and model."""
 
     return get_shared_llm_rate_limiter(
-        requests_per_minute=(settings.llm_requests_per_minute)
+        provider=settings.llm_provider,
+        model_name=resolve_model_name(
+            settings,
+            profile,
+        ),
+        requests_per_minute=settings.llm_requests_per_minute,
     )
 
 
@@ -63,16 +70,23 @@ def create_requirement_extractor(
     """Create the configured requirement-extraction adapter."""
 
     resolved_settings = settings or get_settings()
-    rate_limiter = _get_rate_limiter(resolved_settings)
+    profile = ChatModelProfile.FAST_STRUCTURED_OUTPUT
+    rate_limiter = _get_rate_limiter(
+        resolved_settings,
+        profile,
+    )
     model = create_chat_model(
         settings=resolved_settings,
-        profile=ChatModelProfile.STRUCTURED_OUTPUT,
+        profile=profile,
         rate_limiter=rate_limiter,
     )
 
     return LangChainRequirementExtractor(
         model=model,
-        model_name=resolved_settings.llm_model,
+        model_name=resolve_model_name(
+            resolved_settings,
+            profile,
+        ),
     )
 
 
@@ -83,10 +97,14 @@ def create_evidence_discovery_runner(
     """Create the configured approved-evidence discovery agent."""
 
     resolved_settings = settings or get_settings()
-    rate_limiter = _get_rate_limiter(resolved_settings)
+    profile = ChatModelProfile.TOOL_CALLING
+    rate_limiter = _get_rate_limiter(
+        resolved_settings,
+        profile,
+    )
     model = create_chat_model(
         settings=resolved_settings,
-        profile=ChatModelProfile.TOOL_CALLING,
+        profile=profile,
         rate_limiter=rate_limiter,
     )
 
@@ -94,7 +112,10 @@ def create_evidence_discovery_runner(
         repository=repository,
         settings=resolved_settings,
         model=model,
-        model_name=resolved_settings.llm_model,
+        model_name=resolve_model_name(
+            resolved_settings,
+            profile,
+        ),
     )
 
 
@@ -104,16 +125,23 @@ def create_cv_proposal_generator(
     """Create the configured CV proposal generator."""
 
     resolved_settings = settings or get_settings()
-    rate_limiter = _get_rate_limiter(resolved_settings)
+    profile = ChatModelProfile.QUALITY_STRUCTURED_OUTPUT
+    rate_limiter = _get_rate_limiter(
+        resolved_settings,
+        profile,
+    )
     model = create_chat_model(
         settings=resolved_settings,
-        profile=ChatModelProfile.STRUCTURED_OUTPUT,
+        profile=profile,
         rate_limiter=rate_limiter,
     )
 
     return LangChainCVProposalGenerator(
         model=model,
-        model_name=resolved_settings.llm_model,
+        model_name=resolve_model_name(
+            resolved_settings,
+            profile,
+        ),
     )
 
 
@@ -123,16 +151,23 @@ def create_cv_claim_verifier(
     """Create the configured CV claim-verification adapter."""
 
     resolved_settings = settings or get_settings()
-    rate_limiter = _get_rate_limiter(resolved_settings)
+    profile = ChatModelProfile.QUALITY_STRUCTURED_OUTPUT
+    rate_limiter = _get_rate_limiter(
+        resolved_settings,
+        profile,
+    )
     model = create_chat_model(
         settings=resolved_settings,
-        profile=ChatModelProfile.STRUCTURED_OUTPUT,
+        profile=profile,
         rate_limiter=rate_limiter,
     )
 
     return LangChainCVClaimVerifier(
         model=model,
-        model_name=resolved_settings.llm_model,
+        model_name=resolve_model_name(
+            resolved_settings,
+            profile,
+        ),
     )
 
 
@@ -142,14 +177,21 @@ def create_cv_evidence_extractor(
     """Create the configured CV evidence extractor."""
 
     resolved_settings = settings or get_settings()
-    rate_limiter = _get_rate_limiter(resolved_settings)
+    profile = ChatModelProfile.FAST_STRUCTURED_OUTPUT
+    rate_limiter = _get_rate_limiter(
+        resolved_settings,
+        profile,
+    )
     model = create_chat_model(
         settings=resolved_settings,
-        profile=ChatModelProfile.STRUCTURED_OUTPUT,
+        profile=profile,
         rate_limiter=rate_limiter,
     )
 
     return LangChainCVEvidenceExtractor(
         model=model,
-        model_name=resolved_settings.llm_model,
+        model_name=resolve_model_name(
+            resolved_settings,
+            profile,
+        ),
     )

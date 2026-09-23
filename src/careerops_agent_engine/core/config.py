@@ -41,8 +41,11 @@ class Settings(BaseSettings):
 
     service_api_key: SecretStr | None = None
 
-    llm_provider: Literal["google"] = "google"
+    llm_provider: Literal["google", "groq"] = "google"
     llm_model: str = "gemini-3.5-flash-lite"
+    llm_fast_model: str | None = None
+    llm_quality_model: str | None = None
+    llm_tool_model: str | None = None
     llm_temperature: float = Field(default=1.0, ge=0.0, le=2.0)
     llm_timeout_seconds: float = Field(default=60.0, gt=0.0)
     llm_max_retries: int = Field(default=2, ge=0, le=5)

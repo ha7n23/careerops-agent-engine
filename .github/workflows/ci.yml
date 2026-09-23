@@ -65,6 +65,7 @@ jobs:
 
           CAREEROPS_AUTH_MODE="development"
 
+          CAREEROPS_LLM_PROVIDER="google"
           CAREEROPS_LLM_MODEL="gemini-3.5-flash"
           CAREEROPS_LLM_TEMPERATURE=1.0
           CAREEROPS_LLM_TIMEOUT_SECONDS=60

@@ -8,12 +8,20 @@ from langchain_core.rate_limiters import (
 )
 
 
-@lru_cache(maxsize=16)
+@lru_cache(maxsize=32)
 def get_shared_llm_rate_limiter(
     *,
+    provider: str,
+    model_name: str,
     requests_per_minute: float,
 ) -> BaseRateLimiter:
-    """Return one shared process-local model request limiter."""
+    """Return one process-local limiter per provider and model."""
+
+    if not provider.strip():
+        raise ValueError("LLM provider must not be empty.")
+
+    if not model_name.strip():
+        raise ValueError("LLM model name must not be empty.")
 
     if requests_per_minute <= 0:
         raise ValueError("LLM requests per minute must be positive.")
