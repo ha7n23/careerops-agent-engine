@@ -3,6 +3,7 @@
 from enum import StrEnum
 from typing import Any, Literal, cast
 
+from groq import InternalServerError, RateLimitError
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.rate_limiters import BaseRateLimiter
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -35,6 +36,20 @@ def resolve_model_name(
         return settings.llm_tool_model or settings.llm_model
 
     return settings.llm_model
+
+
+def resolve_transient_model_exceptions(
+    settings: Settings,
+) -> tuple[type[BaseException], ...]:
+    """Return provider errors that permit a bounded model fallback."""
+
+    if settings.llm_provider == "groq":
+        return (
+            RateLimitError,
+            InternalServerError,
+        )
+
+    return ()
 
 
 def create_chat_model(

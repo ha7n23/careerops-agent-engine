@@ -1,5 +1,6 @@
 """Factories for model-backed application adapters."""
 
+from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.rate_limiters import (
     BaseRateLimiter,
 )
@@ -39,6 +40,7 @@ from careerops_agent_engine.infrastructure.llm.model_factory import (
     ChatModelProfile,
     create_chat_model,
     resolve_model_name,
+    resolve_transient_model_exceptions,
 )
 from careerops_agent_engine.infrastructure.llm.rate_limiting import (
     get_shared_llm_rate_limiter,
@@ -64,29 +66,74 @@ def _get_rate_limiter(
     )
 
 
+def _create_fast_structured_models(
+    settings: Settings,
+) -> tuple[
+    BaseChatModel,
+    BaseChatModel | None,
+    tuple[type[BaseException], ...],
+]:
+    """Create a fast primary model and an optional quality fallback."""
+
+    primary_profile = ChatModelProfile.FAST_STRUCTURED_OUTPUT
+    primary_model_name = resolve_model_name(
+        settings,
+        primary_profile,
+    )
+    primary_model = create_chat_model(
+        settings=settings,
+        profile=primary_profile,
+        rate_limiter=_get_rate_limiter(
+            settings,
+            primary_profile,
+        ),
+    )
+
+    fallback_profile = ChatModelProfile.QUALITY_STRUCTURED_OUTPUT
+    fallback_model_name = resolve_model_name(
+        settings,
+        fallback_profile,
+    )
+
+    if settings.llm_provider != "groq" or primary_model_name == fallback_model_name:
+        return primary_model, None, ()
+
+    fallback_model = create_chat_model(
+        settings=settings,
+        profile=fallback_profile,
+        rate_limiter=_get_rate_limiter(
+            settings,
+            fallback_profile,
+        ),
+    )
+
+    return (
+        primary_model,
+        fallback_model,
+        resolve_transient_model_exceptions(settings),
+    )
+
+
 def create_requirement_extractor(
     settings: Settings | None = None,
 ) -> RequirementExtractor:
     """Create the configured requirement-extraction adapter."""
 
     resolved_settings = settings or get_settings()
-    profile = ChatModelProfile.FAST_STRUCTURED_OUTPUT
-    rate_limiter = _get_rate_limiter(
-        resolved_settings,
-        profile,
-    )
-    model = create_chat_model(
-        settings=resolved_settings,
-        profile=profile,
-        rate_limiter=rate_limiter,
-    )
+    (
+        model,
+        fallback_model,
+        fallback_exceptions,
+    ) = _create_fast_structured_models(resolved_settings)
 
     return LangChainRequirementExtractor(
         model=model,
         model_name=resolve_model_name(
             resolved_settings,
-            profile,
+            ChatModelProfile.FAST_STRUCTURED_OUTPUT,
         ),
+        fallback_model=fallback_model,
+        fallback_exceptions=fallback_exceptions,
     )
 
 
@@ -177,21 +224,18 @@ def create_cv_evidence_extractor(
     """Create the configured CV evidence extractor."""
 
     resolved_settings = settings or get_settings()
-    profile = ChatModelProfile.FAST_STRUCTURED_OUTPUT
-    rate_limiter = _get_rate_limiter(
-        resolved_settings,
-        profile,
-    )
-    model = create_chat_model(
-        settings=resolved_settings,
-        profile=profile,
-        rate_limiter=rate_limiter,
-    )
+    (
+        model,
+        fallback_model,
+        fallback_exceptions,
+    ) = _create_fast_structured_models(resolved_settings)
 
     return LangChainCVEvidenceExtractor(
         model=model,
         model_name=resolve_model_name(
             resolved_settings,
-            profile,
+            ChatModelProfile.FAST_STRUCTURED_OUTPUT,
         ),
+        fallback_model=fallback_model,
+        fallback_exceptions=fallback_exceptions,
     )

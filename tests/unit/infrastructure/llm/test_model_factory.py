@@ -3,6 +3,7 @@
 from unittest.mock import Mock
 
 import pytest
+from groq import InternalServerError, RateLimitError
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.rate_limiters import BaseRateLimiter
 
@@ -168,3 +169,26 @@ def test_resolve_model_name_falls_back_to_default(
     )
 
     assert model_factory.resolve_model_name(settings, profile) == "default-model"
+
+
+def test_groq_fallback_handles_only_temporary_capacity_errors() -> None:
+    """Groq fallback should cover rate limits and server failures only."""
+
+    settings = Settings(
+        llm_provider="groq",
+    )
+
+    assert model_factory.resolve_transient_model_exceptions(settings) == (
+        RateLimitError,
+        InternalServerError,
+    )
+
+
+def test_google_has_no_automatic_cross_model_fallback() -> None:
+    """Google remains a manual provider-level rollback option."""
+
+    settings = Settings(
+        llm_provider="google",
+    )
+
+    assert model_factory.resolve_transient_model_exceptions(settings) == ()

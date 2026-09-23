@@ -68,7 +68,7 @@ flowchart TB
 
 The dependency wiring lives in `api/dependencies.py`, where concrete adapters are composed behind application ports. This keeps the core use cases replaceable: LLM providers, repositories, storage, renderers, and converters are infrastructure choices rather than domain assumptions.
 
-Provider-specific SDK construction is isolated in `infrastructure/llm/model_factory.py`, which currently supports Google Gemini and Groq. Requirement extraction, CV evidence extraction, proposal generation, claim verification, and tool-calling evidence discovery receive LangChain’s provider-neutral `BaseChatModel` interface. Fast structured-output, quality structured-output, and tool-calling profiles support deterministic task routing, while rate limiters are shared per provider and model.
+Provider-specific SDK construction is isolated in `infrastructure/llm/model_factory.py`, which currently supports Google Gemini and Groq. Requirement extraction, CV evidence extraction, proposal generation, claim verification, and tool-calling evidence discovery receive LangChain’s provider-neutral `BaseChatModel` interface. Fast structured-output, quality structured-output, and tool-calling profiles support deterministic task routing, while rate limiters are shared per provider and model. Groq fast structured-output calls may make one bounded transition to the quality model after configured primary retries for rate-limit or internal-server failures. The fallback excludes authentication, invalid-request, connection, timeout, validation, and grounding failures; it is not applied to quality or tool-calling paths and never crosses provider boundaries.
 
 ## 2. Trust flow: from untrusted CV to verified artifacts
 
@@ -505,6 +505,6 @@ The Agent Engine has also been validated as a real service boundary from the sep
 
 Verified baseline after these changes:
 
-- **396 passed, 8 skipped**
+- **406 passed, 9 skipped**
 - Ruff formatting and linting clean
-- Strict mypy currently checks **148 source files**; Ruff covers `src` and `tests`.
+- Strict mypy currently checks **149 source files**; Ruff covers `src` and `tests`.

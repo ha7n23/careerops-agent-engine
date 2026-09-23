@@ -15,6 +15,9 @@ from careerops_agent_engine.domain.models.job import (
 from careerops_agent_engine.infrastructure.llm.schemas import (
     ExtractedRequirementSet,
 )
+from careerops_agent_engine.infrastructure.llm.structured_output import (
+    create_structured_output_runnable,
+)
 from careerops_agent_engine.infrastructure.observability.langsmith import (
     build_langsmith_run_config,
 )
@@ -28,12 +31,16 @@ class LangChainRequirementExtractor:
         *,
         model: BaseChatModel,
         model_name: str,
+        fallback_model: BaseChatModel | None = None,
+        fallback_exceptions: tuple[type[BaseException], ...] = (),
     ) -> None:
         """Initialise the structured-output adapter."""
 
-        self._structured_model = model.with_structured_output(
+        self._structured_model = create_structured_output_runnable(
+            model=model,
             schema=ExtractedRequirementSet.model_json_schema(),
-            method="json_schema",
+            fallback_model=fallback_model,
+            fallback_exceptions=fallback_exceptions,
         )
         self._model_name = model_name
 
