@@ -50,6 +50,9 @@ def test_create_google_chat_model_uses_selected_profile(
     settings = Settings(
         llm_provider="google",
         llm_model="gemini-test",
+        llm_fast_model=None,
+        llm_quality_model=None,
+        llm_tool_model=None,
         llm_temperature=0.25,
         llm_timeout_seconds=12.0,
         llm_max_retries=1,
@@ -159,6 +162,9 @@ def test_resolve_model_name_falls_back_to_default(
 
     settings = Settings(
         llm_model="default-model",
+        llm_fast_model=None,
+        llm_quality_model=None,
+        llm_tool_model=None,
     )
 
     assert model_factory.resolve_model_name(settings, profile) == "default-model"

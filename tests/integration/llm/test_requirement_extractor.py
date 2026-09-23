@@ -1,4 +1,4 @@
-"""Live tests for Gemini requirement extraction."""
+"""Live tests for provider-neutral requirement extraction."""
 
 import os
 
@@ -15,8 +15,8 @@ pytestmark = pytest.mark.integration
     os.getenv("RUN_LIVE_LLM_TESTS") != "true",
     reason="Live LLM tests are disabled.",
 )
-def test_google_extractor_returns_structured_requirements() -> None:
-    """Gemini should return validated requirements for synthetic input."""
+def test_configured_extractor_returns_structured_requirements() -> None:
+    """The configured model should return validated requirements."""
 
     extractor = create_requirement_extractor()
 

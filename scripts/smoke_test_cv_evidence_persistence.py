@@ -1,4 +1,4 @@
-"""Run a real PostgreSQL + Gemini CV evidence persistence smoke test."""
+"""Run a real PostgreSQL and configured-LLM evidence persistence smoke test."""
 
 from io import BytesIO
 from uuid import uuid4
@@ -209,14 +209,15 @@ def main() -> None:
     )
 
     assert awaiting.status is CVEvidenceReviewRunStatus.AWAITING_REVIEW, (
-        "Expected Gemini to produce at least one grounded evidence proposal, "
+        "Expected the configured model to produce at least one grounded "
+        "evidence proposal, "
         f"but workflow status was {awaiting.status.value!r}."
     )
 
     assert awaiting.proposals
 
     print(f"review_run_id: {awaiting.review_run_id}")
-    print(f"Gemini grounded proposals: {len(awaiting.proposals)}")
+    print(f"Grounded proposals: {len(awaiting.proposals)}")
     print(f"overlap findings: {len(awaiting.overlap_findings)}")
 
     for proposal in awaiting.proposals:

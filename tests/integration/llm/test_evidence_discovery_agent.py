@@ -1,4 +1,4 @@
-"""Live tests for the bounded Gemini evidence agent."""
+"""Live tests for the bounded LLM evidence agent."""
 
 import os
 
@@ -31,7 +31,7 @@ pytestmark = pytest.mark.integration
     reason="Live LLM tests are disabled.",
 )
 def test_docker_is_related_not_direct_kubernetes_evidence() -> None:
-    """Gemini must preserve the Docker/Kubernetes distinction."""
+    """The configured model must preserve the Docker/Kubernetes distinction."""
 
     repository = InMemoryEvidenceRepository(
         {

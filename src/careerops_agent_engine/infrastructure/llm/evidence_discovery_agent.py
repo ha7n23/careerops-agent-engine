@@ -12,6 +12,7 @@ from langchain.agents.middleware import (
 from langchain.agents.middleware.model_call_limit import (
     ModelCallLimitExceededError,
 )
+from langchain.agents.structured_output import ToolStrategy
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import BaseMessage
 
@@ -93,7 +94,9 @@ class LangChainEvidenceDiscoveryAgent:
             model=model,
             tools=tools,
             system_prompt=EVIDENCE_DISCOVERY_SYSTEM_PROMPT,
-            response_format=EvidenceMatch,
+            response_format=ToolStrategy(
+                schema=EvidenceMatch,
+            ),
             context_schema=EvidenceAgentContext,
             middleware=middleware,
             name="careerops_evidence_discovery_agent",

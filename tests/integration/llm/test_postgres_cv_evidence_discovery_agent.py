@@ -1,4 +1,4 @@
-"""Live PostgreSQL + Gemini proof for CV evidence discovery."""
+"""Live PostgreSQL + LLM proof for CV evidence discovery."""
 
 import os
 from uuid import uuid4
