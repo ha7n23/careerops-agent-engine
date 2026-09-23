@@ -54,8 +54,8 @@ pytestmark = pytest.mark.integration
     os.getenv("RUN_LIVE_LLM_TESTS") != "true",
     reason="Live LLM tests are disabled.",
 )
-def test_gemini_discovers_human_approved_cv_evidence_from_postgres() -> None:
-    """Real Gemini should discover CV evidence promoted into PostgreSQL."""
+def test_configured_model_discovers_approved_cv_evidence_from_postgres() -> None:
+    """The configured model should discover approved PostgreSQL evidence."""
 
     suffix = uuid4().hex[:8].upper()
 
@@ -238,7 +238,7 @@ def test_gemini_discovers_human_approved_cv_evidence_from_postgres() -> None:
             "explanation:",
             match.explanation,
         )
-        print("REAL GEMINI + POSTGRES EVIDENCE DISCOVERY PASSED")
+        print("CONFIGURED LLM + POSTGRES EVIDENCE DISCOVERY PASSED")
 
     finally:
         wait_for_all_tracers()

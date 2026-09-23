@@ -65,7 +65,7 @@ pytestmark = pytest.mark.integration
     reason="Live LLM tests are disabled.",
 )
 def test_full_job_analysis_uses_approved_cv_evidence_safely() -> None:
-    """Run real Gemini job analysis through review or deterministic blocking."""
+    """Run real configured-provider job analysis through the safety boundary."""
 
     suffix = uuid4().hex[:8].upper()
 
@@ -217,11 +217,11 @@ def test_full_job_analysis_uses_approved_cv_evidence_safely() -> None:
         # 2. Run the real production job-analysis service.
         #
         # This uses:
-        # - real Gemini requirement extraction
+        # - real requirement extraction
         # - real agentic evidence discovery
         # - deterministic fit scoring
-        # - real Gemini CV proposal generation
-        # - real Gemini claim verification
+        # - real CV proposal generation
+        # - real claim verification
         # - PostgreSQL LangGraph checkpointing
         # ---------------------------------------------------------
         execution = get_job_analysis_service().analyse(

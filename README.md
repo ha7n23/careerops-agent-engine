@@ -109,7 +109,7 @@ Interactive OpenAPI documentation is available from FastAPI at `/docs` when the 
 
 ### Docker-first
 
-Requirements: Docker with Compose. Live Google workflows require `GOOGLE_API_KEY`; live Groq workflows require `GROQ_API_KEY`. Google remains the default provider until Groq live validation and evaluation pass.
+Requirements: Docker with Compose. Groq is the default provider and requires `GROQ_API_KEY` for live workflows. Google Gemini remains supported and requires `GOOGLE_API_KEY` when selected.
 
 ```bash
 cp .env.example .env
@@ -141,7 +141,7 @@ uv run python -m mypy src
 uv run pytest
 ```
 
-Groq can be enabled explicitly with `CAREEROPS_LLM_PROVIDER="groq"`. Optional fast, quality, and tool-calling model settings allow deterministic task routing while falling back to `CAREEROPS_LLM_MODEL` when an override is unset.
+The default Groq routing uses `openai/gpt-oss-20b` for fast structured extraction and `openai/gpt-oss-120b` for quality generation, verification, and tool-calling. Google can be selected through `CAREEROPS_LLM_PROVIDER="google"` with compatible model settings. Unset task-profile overrides fall back to `CAREEROPS_LLM_MODEL`.
 
 Live LLM-provider and LibreOffice integration tests are opt-in through `RUN_LIVE_LLM_TESTS=true` and `RUN_LIVE_DOCUMENT_TESTS=true` so the default suite stays deterministic and CI-friendly.
 
@@ -196,6 +196,14 @@ See **[docs/architecture.md](docs/ARCHITECTURE.md)** for the graph topology, evi
 
 ## Project updates
 
+### 2026-09-23 — Provider-neutral Groq routing
+
+- Added provider-neutral Google Gemini and Groq model construction.
+- Made Groq the default provider with deterministic 20B fast and 120B quality/tool routing.
+- Added per-provider and per-model rate limiting.
+- Added explicit tool-based structured output for Groq-compatible evidence discovery.
+- Live-validated requirement extraction, CV evidence extraction, proposal generation, claim verification, tool calling, PostgreSQL persistence, and the complete job-analysis safety workflow.
+
 ### 2026-08-25 — Integration and resilience hardening
 
 - Switched the current MVP default LLM to `gemini-3.5-flash-lite` for more practical development throughput while keeping the provider boundary replaceable.
@@ -205,4 +213,4 @@ See **[docs/architecture.md](docs/ARCHITECTURE.md)** for the graph topology, evi
 - Added regression coverage for bounded evidence-discovery failure handling.
 - Successfully validated authenticated service-to-service job analysis from the separate CareerOps Automation & MCP Hub over the public HTTP API.
 
-Current quality baseline: **377 passed, 8 skipped**, Ruff clean, strict mypy clean across **147 source files**.
+Current quality baseline: **397 passed, 9 skipped**, Ruff clean, strict mypy clean across **148 source files**.

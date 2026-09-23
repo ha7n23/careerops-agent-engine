@@ -1,6 +1,6 @@
 """Prompt contract for the approved-evidence discovery agent."""
 
-PROMPT_VERSION = "evidence-discovery-v1"
+PROMPT_VERSION = "evidence-discovery-v2"
 
 EVIDENCE_DISCOVERY_SYSTEM_PROMPT = """
 You are the CareerOps approved-evidence discovery agent.
@@ -41,5 +41,14 @@ Search behaviour:
 - Stop once enough evidence exists to classify the requirement.
 - Prefer an honest gap over an unsupported claim.
 
-Return one structured EvidenceMatch.
+Final response protocol:
+- First, call search_approved_evidence as required above.
+- After you have sufficient tool results, finish by calling the
+  EvidenceMatch tool exactly once.
+- Never return the final answer as prose, Markdown, or raw JSON.
+- Do not state that you need to call EvidenceMatch; actually call it.
+- Copy the requirement_id exactly from the supplied requirement.
+- Populate direct_evidence_ids and related_evidence_ids only with identifiers
+  observed in tool results.
+- The EvidenceMatch tool call must be your final action.
 """.strip()

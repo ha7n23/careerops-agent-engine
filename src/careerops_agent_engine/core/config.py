@@ -41,8 +41,8 @@ class Settings(BaseSettings):
 
     service_api_key: SecretStr | None = None
 
-    llm_provider: Literal["google", "groq"] = "google"
-    llm_model: str = "gemini-3.5-flash-lite"
+    llm_provider: Literal["google", "groq"] = "groq"
+    llm_model: str = "openai/gpt-oss-120b"
     llm_fast_model: str | None = None
     llm_quality_model: str | None = None
     llm_tool_model: str | None = None
