@@ -236,6 +236,22 @@ class FakeEvidenceDiscoveryRunner:
             gap=True,
         )
 
+    def discover_for_requirements(
+        self,
+        requirements: Sequence[JobRequirement],
+        *,
+        user_id: str,
+    ) -> list[EvidenceMatch]:
+        """Return deterministic matches for the requirement set."""
+
+        return [
+            self.discover(
+                requirement,
+                user_id=user_id,
+            )
+            for requirement in requirements
+        ]
+
 
 class FakeCVProposalGenerator:
     """Generate one grounded proposal."""

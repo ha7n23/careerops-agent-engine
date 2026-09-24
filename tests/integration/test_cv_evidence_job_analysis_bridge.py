@@ -1,6 +1,6 @@
 """Integration proof from approved CV evidence into job analysis."""
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 
 import pytest
 from sqlalchemy import create_engine
@@ -102,6 +102,22 @@ class RepositoryBackedEvidenceDiscoveryRunner:
             explanation=("Approved CV evidence directly matched the requirement."),
             gap=False,
         )
+
+    def discover_for_requirements(
+        self,
+        requirements: Sequence[JobRequirement],
+        *,
+        user_id: str,
+    ) -> list[EvidenceMatch]:
+        """Discover repository-backed matches for all requirements."""
+
+        return [
+            self.discover(
+                requirement,
+                user_id=user_id,
+            )
+            for requirement in requirements
+        ]
 
 
 @pytest.fixture

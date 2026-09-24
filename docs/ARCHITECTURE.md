@@ -201,6 +201,8 @@ Only approved evidence is exposed to downstream job analysis.
 
 This makes the agent useful for semantic search/reasoning without giving it authority to manufacture career history.
 
+Before running evidence discovery for a requirement set, the runner performs one bounded approved-evidence existence check. If the authenticated user has no approved Evidence Registry entries, CareerOps returns one deterministic `MatchStrength.NONE` gap per requirement without invoking the tool-calling model. Users with approved evidence retain the existing bounded per-requirement agent path.
+
 ## 6. Requirement extraction and deterministic fit scoring
 
 Job descriptions are treated as **untrusted document content**. The current requirement prompt explicitly instructs the model not to follow instructions embedded inside the posting and to extract only supported requirements.
@@ -443,7 +445,7 @@ Cloud deployment is deliberately deferred. The project proves deployment readine
 
 ## 15. Testing strategy
 
-The current verified baseline is **425 passed, 9 skipped**.
+The current verified baseline is **428 passed, 9 skipped**.
 
 The suite covers:
 

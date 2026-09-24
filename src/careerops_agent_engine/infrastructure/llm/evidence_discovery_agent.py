@@ -44,6 +44,23 @@ from careerops_agent_engine.infrastructure.observability.langsmith import (
 )
 
 
+def build_empty_registry_match(
+    requirement: JobRequirement,
+) -> EvidenceMatch:
+    """Create a deterministic gap when no approved evidence exists."""
+
+    return EvidenceMatch(
+        requirement_id=requirement.requirement_id,
+        match_strength=MatchStrength.NONE,
+        direct_evidence_ids=[],
+        related_evidence_ids=[],
+        explanation=(
+            "No human-approved career evidence is available for evidence discovery."
+        ),
+        gap=True,
+    )
+
+
 class LangChainEvidenceDiscoveryAgent:
     """Bounded tool-calling agent for approved career evidence."""
 
@@ -105,6 +122,40 @@ class LangChainEvidenceDiscoveryAgent:
         self._repository = repository
         self._recursion_limit = settings.evidence_agent_recursion_limit
         self._model_name = model_name
+
+    def discover_for_requirements(
+        self,
+        requirements: Sequence[JobRequirement],
+        *,
+        user_id: str,
+    ) -> list[EvidenceMatch]:
+        """Discover matches with an empty-registry fast path."""
+
+        requirement_list = list(requirements)
+
+        if not requirement_list:
+            return []
+
+        approved_evidence_exists = bool(
+            self._repository.list_approved(
+                user_id=user_id,
+                limit=1,
+            )
+        )
+
+        if not approved_evidence_exists:
+            return [
+                build_empty_registry_match(requirement)
+                for requirement in requirement_list
+            ]
+
+        return [
+            self.discover(
+                requirement,
+                user_id=user_id,
+            )
+            for requirement in requirement_list
+        ]
 
     def discover(
         self,

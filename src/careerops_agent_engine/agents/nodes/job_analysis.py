@@ -118,7 +118,7 @@ def create_extract_requirements_node(
 def create_discover_evidence_node(
     evidence_discovery_runner: EvidenceDiscoveryRunner,
 ) -> Callable[[JobAnalysisState], JobAnalysisUpdate]:
-    """Create a node that discovers evidence for every requirement."""
+    """Discover evidence with runner-level call optimisation."""
 
     def discover_evidence(
         state: JobAnalysisState,
@@ -128,13 +128,10 @@ def create_discover_evidence_node(
             for payload in state.get("requirements", [])
         ]
 
-        matches = [
-            evidence_discovery_runner.discover(
-                requirement,
-                user_id=state["user_id"],
-            )
-            for requirement in requirements
-        ]
+        matches = evidence_discovery_runner.discover_for_requirements(
+            requirements,
+            user_id=state["user_id"],
+        )
 
         return {
             "evidence_matches": [match.model_dump(mode="json") for match in matches],
