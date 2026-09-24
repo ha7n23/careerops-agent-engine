@@ -9,6 +9,9 @@ from langgraph.types import Command
 from careerops_agent_engine.agents.graphs.job_analysis import (
     build_job_analysis_graph,
 )
+from careerops_agent_engine.application.ports.cv_claim_verifier import (
+    CVClaimVerificationRequest,
+)
 from careerops_agent_engine.application.ports.cv_proposal_generator import (
     CVProposalGenerationRequest,
 )
@@ -283,6 +286,21 @@ class FakeClaimVerifier:
             fully_supported=True,
             unsupported_claims=[],
         )
+
+    def verify_batch(
+        self,
+        *,
+        requests: Sequence[CVClaimVerificationRequest],
+    ) -> list[CVClaimVerificationReport]:
+        """Return deterministic reports for one simulated batch call."""
+
+        return [
+            self.verify(
+                proposal=request.proposal,
+                approved_evidence=request.approved_evidence,
+            )
+            for request in requests
+        ]
 
 
 def build_repository() -> InMemoryEvidenceRepository:

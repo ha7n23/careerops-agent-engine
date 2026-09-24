@@ -1,5 +1,6 @@
-"""Live integration test for strict CV claim verification."""
+"""Live integration test for batched CV claim verification."""
 
+import json
 import os
 
 import pytest
@@ -30,8 +31,8 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def test_live_verifier_blocks_invented_metric() -> None:
-    """Real verification should identify an unsupported metric."""
+def test_live_batched_verifier_separates_supported_and_unsupported() -> None:
+    """Real batch verification should assess proposals independently."""
 
     settings = get_settings()
 
@@ -41,15 +42,26 @@ def test_live_verifier_blocks_invented_metric() -> None:
     repository = SqlAlchemyEvidenceRepository(session_factory)
 
     try:
-        proposal = CVChangeProposal(
-            proposal_id="CVP-LIVE-VERIFY-001",
+        supported_proposal = CVChangeProposal(
+            proposal_id="CVP-LIVE-VERIFY-SUPPORTED",
+            section=CVSection.PROJECTS,
+            proposed_text=(
+                "Built a stateful LangGraph workflow with structured Gemini extraction."
+            ),
+            requirement_ids=["REQ-LIVE-SUPPORTED"],
+            supporting_evidence_ids=["EVD-DEMO-CAREEROPS"],
+            confidence_score=0.95,
+            warnings=[],
+        )
+        unsupported_proposal = CVChangeProposal(
+            proposal_id="CVP-LIVE-VERIFY-UNSUPPORTED",
             section=CVSection.PROJECTS,
             proposed_text=(
                 "Built a stateful LangGraph workflow with "
                 "structured Gemini extraction and reduced "
                 "production latency by 40 percent."
             ),
-            requirement_ids=["REQ-LIVE-001"],
+            requirement_ids=["REQ-LIVE-UNSUPPORTED"],
             supporting_evidence_ids=["EVD-DEMO-CAREEROPS"],
             confidence_score=0.9,
             warnings=[],
@@ -60,20 +72,41 @@ def test_live_verifier_blocks_invented_metric() -> None:
             verifier=create_cv_claim_verifier(settings),
         )
 
-        report = service.verify_proposal(
+        reports = service.verify_proposals(
             user_id=DEVELOPMENT_USER_ID,
-            proposal=proposal,
+            proposals=[
+                supported_proposal,
+                unsupported_proposal,
+            ],
         )
 
         print()
-        print("Live claim-verification report:")
-        print(report.model_dump_json(indent=2))
+        print("Live batched claim-verification reports:")
+        print(
+            json.dumps(
+                [report.model_dump(mode="json") for report in reports],
+                indent=2,
+            )
+        )
 
-        assert report.coverage_complete is True
-        assert report.fully_supported is False
-        assert report.unsupported_claims
+        assert len(reports) == 2
 
-        combined_unsupported = " ".join(report.unsupported_claims).casefold()
+        reports_by_proposal = {report.proposal_id: report for report in reports}
+
+        supported_report = reports_by_proposal["CVP-LIVE-VERIFY-SUPPORTED"]
+        unsupported_report = reports_by_proposal["CVP-LIVE-VERIFY-UNSUPPORTED"]
+
+        assert supported_report.coverage_complete is True
+        assert supported_report.fully_supported is True
+        assert supported_report.unsupported_claims == []
+
+        assert unsupported_report.coverage_complete is True
+        assert unsupported_report.fully_supported is False
+        assert unsupported_report.unsupported_claims
+
+        combined_unsupported = " ".join(
+            unsupported_report.unsupported_claims
+        ).casefold()
 
         assert "40" in combined_unsupported
         assert "latency" in combined_unsupported

@@ -220,7 +220,9 @@ After evidence discovery, fit is calculated deterministically from requirement i
 
 For each supported requirement, CareerOps can generate a `CVChangeProposal` using only approved evidence context.
 
-Initial proposal generation is batched across all eligible requirements, reducing N quality-model calls to at most one. Each batch item carries its requirement identifier, but deterministic application code attaches stable proposal IDs, verifies that the response contains exactly one result per requested requirement, restores request ordering, and checks every cited evidence ID against that requirement’s approved direct-evidence context. Human-requested regeneration remains targeted to individual proposals, and claim verification remains a separate model-backed safety step.
+Initial proposal generation is batched across all eligible requirements, reducing N quality-model calls to at most one. Each batch item carries its requirement identifier, but deterministic application code attaches stable proposal IDs, verifies exact requirement coverage, restores request ordering, and checks every cited evidence ID against that requirement’s approved direct-evidence context.
+
+Initial claim verification is then independently batched across all generated proposals, reducing N additional quality-model calls to at most one separate verifier invocation. Deterministic code requires exactly one report per proposal and validates every cited evidence ID against that proposal’s own approved context. Generation and verification therefore remain separate safety stages rather than trusting one model output. Human-requested regeneration and subsequent reverification remain targeted to individual proposals.
 
 Before a proposal is shown to a human, a separate claim-verification step assesses the factual statements against approved evidence. The application service validates the verification result and splits proposal IDs into:
 
@@ -441,7 +443,7 @@ Cloud deployment is deliberately deferred. The project proves deployment readine
 
 ## 15. Testing strategy
 
-The current verified baseline is **415 passed, 9 skipped**.
+The current verified baseline is **425 passed, 9 skipped**.
 
 The suite covers:
 

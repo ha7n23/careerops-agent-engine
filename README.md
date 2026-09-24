@@ -12,7 +12,7 @@ CareerOps Agent Engine is a portfolio-grade AI engineering project built around 
 - **Job-analysis graph:** extract requirements, use a bounded tool-calling agent to discover approved evidence, calculate a deterministic fit score, generate grounded CV proposals, verify factual claims, and pause for human review.
 - **Verified document output:** apply accepted changes to a structured CV, create an immutable version, render an ATS-friendly DOCX, convert it to PDF with LibreOffice, and deterministically verify both artifacts before download.
 - **Production-style engineering:** PostgreSQL persistence and LangGraph checkpoints, LangSmith tracing/evaluation with privacy masking, FastAPI security boundaries, Dockerised runtime, Alembic migrations, and GitHub Actions container integration.
-- **Current quality baseline:** **415 passing tests**, **9 opt-in live integration tests skipped by default**, Ruff clean, and strict mypy checks across **149 source files**.
+- **Current quality baseline:** **425 passing tests**, **9 opt-in live integration tests skipped by default**, Ruff clean, and strict mypy checks across **149 source files**.
 
 > For the deeper design, trust boundaries, workflow states, persistence model, and trade-offs, see [Architecture](docs/ARCHITECTURE.md).
 
@@ -199,12 +199,13 @@ See **[docs/architecture.md](docs/ARCHITECTURE.md)** for the graph topology, evi
 ## Project updates
 
 
-### 2026-09-24 — Batched CV proposal generation
+### 2026-09-24 — Batched CV generation and verification
 
 - Reduced initial CV proposal generation from one quality-model call per eligible requirement to at most one batched call.
-- Added deterministic validation for exact requirement coverage, stable proposal IDs, response ordering, and approved-evidence boundaries.
-- Kept claim verification as a separate safety step and retained targeted single-proposal regeneration for human feedback.
-- Live-validated two grounded Groq proposals from one structured batch invocation.
+- Reduced initial claim verification from one quality-model call per proposal to at most one separate batched verification call.
+- Added deterministic validation for exact requirement/proposal coverage, stable identifiers, response ordering, and per-item approved-evidence boundaries.
+- Kept generation and verification as independent safety stages, while retaining targeted regeneration and reverification after human feedback.
+- Live-validated two grounded proposals from one generation call and independent supported/unsupported decisions from one verification call.
 
 ### 2026-09-23 — Provider-neutral Groq routing
 
@@ -224,4 +225,4 @@ See **[docs/architecture.md](docs/ARCHITECTURE.md)** for the graph topology, evi
 - Added regression coverage for bounded evidence-discovery failure handling.
 - Successfully validated authenticated service-to-service job analysis from the separate CareerOps Automation & MCP Hub over the public HTTP API.
 
-Current quality baseline: **415 passed, 9 skipped**, Ruff clean, strict mypy clean across **149 source files**.
+Current quality baseline: **425 passed, 9 skipped**, Ruff clean, strict mypy clean across **149 source files**.

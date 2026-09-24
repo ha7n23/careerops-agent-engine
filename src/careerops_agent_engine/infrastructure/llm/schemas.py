@@ -112,6 +112,23 @@ class GeneratedClaimVerification(DomainModel):
     coverage_notes: list[str] = Field(default_factory=list)
 
 
+class GeneratedClaimVerificationBatchItem(GeneratedClaimVerification):
+    """One generated verification mapped to its proposal."""
+
+    proposal_id: str = Field(
+        min_length=1,
+        max_length=64,
+    )
+
+
+class GeneratedClaimVerificationBatch(DomainModel):
+    """Provider result containing one batch of verifications."""
+
+    verifications: list[GeneratedClaimVerificationBatchItem] = Field(
+        min_length=1,
+    )
+
+
 class ExtractedCareerEvidenceCandidate(DomainModel):
     """One provider-extracted CV evidence candidate."""
 

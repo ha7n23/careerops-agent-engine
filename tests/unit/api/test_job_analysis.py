@@ -15,6 +15,9 @@ from langgraph.checkpoint.memory import InMemorySaver
 from careerops_agent_engine.api.dependencies import (
     get_job_analysis_service,
 )
+from careerops_agent_engine.application.ports.cv_claim_verifier import (
+    CVClaimVerificationRequest,
+)
 from careerops_agent_engine.application.ports.cv_proposal_generator import (
     CVProposalGenerationRequest,
 )
@@ -388,6 +391,21 @@ class FakeClaimVerifier:
             fully_supported=True,
             unsupported_claims=[],
         )
+
+    def verify_batch(
+        self,
+        *,
+        requests: Sequence[CVClaimVerificationRequest],
+    ) -> list[CVClaimVerificationReport]:
+        """Return deterministic reports for one simulated batch call."""
+
+        return [
+            self.verify(
+                proposal=request.proposal,
+                approved_evidence=request.approved_evidence,
+            )
+            for request in requests
+        ]
 
 
 def build_repository() -> InMemoryEvidenceRepository:

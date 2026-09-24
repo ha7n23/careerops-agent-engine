@@ -1,9 +1,12 @@
 """Application service for grounded CV claim verification."""
 
+from collections.abc import Sequence
+
 from careerops_agent_engine.application.exceptions import (
     CVClaimVerificationValidationError,
 )
 from careerops_agent_engine.application.ports.cv_claim_verifier import (
+    CVClaimVerificationRequest,
     CVClaimVerifier,
 )
 from careerops_agent_engine.application.ports.evidence_repository import (
@@ -61,6 +64,87 @@ class CVClaimVerificationService:
         )
 
         return report
+
+    def verify_proposals(
+        self,
+        *,
+        user_id: str,
+        proposals: Sequence[CVChangeProposal],
+    ) -> list[CVClaimVerificationReport]:
+        """Verify all initial proposals through one batch call."""
+
+        proposal_list = list(proposals)
+        proposal_ids = [proposal.proposal_id for proposal in proposal_list]
+
+        if len(proposal_ids) != len(set(proposal_ids)):
+            raise CVClaimVerificationValidationError(
+                "Batch claim verification requires unique proposal identifiers."
+            )
+
+        verification_requests: list[CVClaimVerificationRequest] = []
+        allowed_evidence_ids_by_proposal: dict[
+            str,
+            set[str],
+        ] = {}
+
+        for proposal in proposal_list:
+            approved_evidence = self._load_supporting_evidence(
+                user_id=user_id,
+                proposal=proposal,
+            )
+
+            verification_requests.append(
+                CVClaimVerificationRequest(
+                    proposal=proposal,
+                    approved_evidence=tuple(approved_evidence),
+                )
+            )
+            allowed_evidence_ids_by_proposal[proposal.proposal_id] = {
+                evidence.evidence_id for evidence in approved_evidence
+            }
+
+        if not verification_requests:
+            return []
+
+        generated_reports = self._verifier.verify_batch(
+            requests=verification_requests,
+        )
+
+        reports_by_proposal: dict[
+            str,
+            CVClaimVerificationReport,
+        ] = {}
+
+        for report in generated_reports:
+            if report.proposal_id in reports_by_proposal:
+                raise CVClaimVerificationValidationError(
+                    "Batch claim verification returned duplicate proposal identifiers."
+                )
+
+            reports_by_proposal[report.proposal_id] = report
+
+        expected_proposal_ids = set(proposal_ids)
+
+        if set(reports_by_proposal) != expected_proposal_ids:
+            raise CVClaimVerificationValidationError(
+                "Batch claim verification must return exactly one report per proposal."
+            )
+
+        validated_reports: list[CVClaimVerificationReport] = []
+
+        for proposal in proposal_list:
+            report = reports_by_proposal[proposal.proposal_id]
+
+            validate_claim_verification_report(
+                proposal=proposal,
+                report=report,
+                allowed_evidence_ids=(
+                    allowed_evidence_ids_by_proposal[proposal.proposal_id]
+                ),
+            )
+            validated_reports.append(report)
+
+        return validated_reports
 
     def _load_supporting_evidence(
         self,

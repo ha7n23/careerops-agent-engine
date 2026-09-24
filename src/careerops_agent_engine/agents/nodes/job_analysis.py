@@ -222,7 +222,7 @@ def create_generate_cv_proposals_node(
 def create_verify_cv_proposals_node(
     verification_service: CVClaimVerificationService,
 ) -> Callable[[JobAnalysisState], JobAnalysisUpdate]:
-    """Verify generated wording before human review is allowed."""
+    """Verify initial proposals through one bounded batch call."""
 
     def verify_cv_proposals(
         state: JobAnalysisState,
@@ -232,27 +232,26 @@ def create_verify_cv_proposals_node(
             for payload in state.get("cv_proposals", [])
         ]
 
-        reports: list[dict[str, object]] = []
+        reports = verification_service.verify_proposals(
+            user_id=state["user_id"],
+            proposals=proposals,
+        )
+
         reviewable_proposal_ids: list[str] = []
         blocked_proposal_ids: list[str] = []
 
-        for proposal in proposals:
-            report = verification_service.verify_proposal(
-                user_id=state["user_id"],
-                proposal=proposal,
-            )
-
-            reports.append(report.model_dump(mode="json"))
-
+        for report in reports:
             if report.fully_supported:
-                reviewable_proposal_ids.append(proposal.proposal_id)
+                reviewable_proposal_ids.append(report.proposal_id)
             else:
-                blocked_proposal_ids.append(proposal.proposal_id)
+                blocked_proposal_ids.append(report.proposal_id)
 
         return {
-            "claim_verification_reports": reports,
+            "claim_verification_reports": [
+                report.model_dump(mode="json") for report in reports
+            ],
             "reviewable_proposal_ids": (reviewable_proposal_ids),
-            "blocked_proposal_ids": blocked_proposal_ids,
+            "blocked_proposal_ids": (blocked_proposal_ids),
             "audit_events": [
                 {
                     "node": "verify_cv_proposals",

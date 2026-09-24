@@ -7,6 +7,9 @@ import pytest
 from careerops_agent_engine.application.exceptions import (
     CVClaimVerificationValidationError,
 )
+from careerops_agent_engine.application.ports.cv_claim_verifier import (
+    CVClaimVerificationRequest,
+)
 from careerops_agent_engine.application.services.cv_claim_verification import (
     CVClaimVerificationService,
 )
@@ -100,6 +103,21 @@ class FakeClaimVerifier:
 
         self.call_count += 1
         return self.report
+
+    def verify_batch(
+        self,
+        *,
+        requests: Sequence[CVClaimVerificationRequest],
+    ) -> list[CVClaimVerificationReport]:
+        """Reuse deterministic single verification for test requests."""
+
+        return [
+            self.verify(
+                proposal=request.proposal,
+                approved_evidence=request.approved_evidence,
+            )
+            for request in requests
+        ]
 
 
 def build_service(
