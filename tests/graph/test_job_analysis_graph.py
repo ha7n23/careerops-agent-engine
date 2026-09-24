@@ -140,6 +140,29 @@ class FakeEvidenceDiscoveryRunner:
         ]
 
 
+class FakeAllMatchedEvidenceDiscoveryRunner(FakeEvidenceDiscoveryRunner):
+    """Return approved evidence for every test requirement."""
+
+    def discover(
+        self,
+        requirement: JobRequirement,
+        *,
+        user_id: str,
+    ) -> EvidenceMatch:
+        """Return one deterministic strong match."""
+
+        assert user_id == "USER-TEST-001"
+
+        return EvidenceMatch(
+            requirement_id=requirement.requirement_id,
+            match_strength=MatchStrength.STRONG,
+            direct_evidence_ids=["EVD-PYTHON"],
+            related_evidence_ids=[],
+            explanation="Approved evidence directly supports this requirement.",
+            gap=False,
+        )
+
+
 class FakeCVProposalGenerator:
     """Return one predictable Python CV proposal."""
 
@@ -347,6 +370,8 @@ def build_repository() -> InMemoryEvidenceRepository:
 
 def build_test_graph(
     checkpointer: InMemorySaver,
+    *,
+    evidence_discovery_runner: FakeEvidenceDiscoveryRunner | None = None,
 ):
     """Create a durable graph backed by deterministic adapters."""
 
@@ -364,7 +389,9 @@ def build_test_graph(
 
     return build_job_analysis_graph(
         requirement_extractor=FakeRequirementExtractor(),
-        evidence_discovery_runner=FakeEvidenceDiscoveryRunner(),
+        evidence_discovery_runner=(
+            evidence_discovery_runner or FakeEvidenceDiscoveryRunner()
+        ),
         cv_proposal_service=proposal_service,
         cv_claim_verification_service=verification_service,
         checkpointer=checkpointer,
@@ -445,6 +472,71 @@ def test_valid_job_pauses_then_resumes_with_approval() -> None:
         "cv_proposals_generated",
         "cv_proposals_verified",
         "human_review_received",
+        "human_review_finalized",
+        "job_analysis_completed",
+    ]
+
+
+def test_partial_approval_keeps_only_approved_proposals() -> None:
+    """A mixed approve/reject decision should complete in one review."""
+
+    checkpointer = InMemorySaver()
+
+    graph = build_test_graph(
+        checkpointer,
+        evidence_discovery_runner=(FakeAllMatchedEvidenceDiscoveryRunner()),
+    )
+
+    config: RunnableConfig = {
+        "configurable": {
+            "thread_id": "THREAD-GRAPH-PARTIAL-APPROVE",
+        }
+    }
+
+    paused = graph.invoke(
+        {
+            "job_id": "JOB-PARTIAL-APPROVE",
+            "user_id": "USER-TEST-001",
+            "job_description": (
+                "We require strong Python development and "
+                "LangGraph workflow experience."
+            ),
+            "audit_events": [],
+        },
+        config=config,
+    )
+
+    reviewable_ids = paused["reviewable_proposal_ids"]
+
+    assert "__interrupt__" in paused
+    assert len(reviewable_ids) == 2
+
+    approved_id, rejected_id = reviewable_ids
+
+    decision = CVReviewDecision(
+        action=ReviewAction.APPROVE,
+        approved_proposal_ids=[approved_id],
+        rejected_proposal_ids=[rejected_id],
+    )
+
+    resumed = graph.invoke(
+        Command(resume=decision.model_dump(mode="json")),
+        config=config,
+    )
+
+    assert "__interrupt__" not in resumed
+    assert resumed["status"] == "completed"
+    assert resumed["review_status"] == "approved"
+
+    final_ids = {proposal["proposal_id"] for proposal in resumed["final_cv_proposals"]}
+
+    assert final_ids == {approved_id}
+
+    audit_events = [event["event"] for event in resumed["audit_events"]]
+
+    assert audit_events.count("cv_proposals_verified") == 1
+    assert "cv_proposals_regenerated" not in audit_events
+    assert audit_events[-2:] == [
         "human_review_finalized",
         "job_analysis_completed",
     ]

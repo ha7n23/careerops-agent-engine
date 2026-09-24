@@ -47,14 +47,14 @@ def validate_review_decision(
         )
 
     if decision.action is ReviewAction.APPROVE:
-        if approved_ids != expected_ids:
-            raise CVReviewValidationError(
-                "An approval decision must approve every reviewable proposal."
-            )
+        if edited_ids:
+            raise CVReviewValidationError("An approval decision cannot edit proposals.")
 
-        if rejected_ids or edited_ids:
+        decided_ids = approved_ids | rejected_ids
+
+        if decided_ids != expected_ids:
             raise CVReviewValidationError(
-                "An approval decision cannot reject or edit proposals."
+                "Every reviewable proposal must be approved or rejected."
             )
 
         return

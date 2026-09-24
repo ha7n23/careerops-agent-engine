@@ -151,10 +151,12 @@ The workflow must pause, resume, branch, and sometimes loop:
 
 - validation can terminate early;
 - unsupported generated proposals can be blocked before review;
-- a reviewer can approve, reject, edit, or request regeneration;
+- a reviewer can approve useful proposals and reject the remainder in one complete decision, reject all proposals, edit wording, or request regeneration;
 - edited text is re-verified;
 - regenerated text is re-verified and then **returns to human review** rather than auto-approving;
 - unsafe edits/regenerations can enter a rework path.
+
+A mixed approve/reject decision must classify every reviewable proposal exactly once. The approved subset becomes final and the workflow completes without another model call; rejected proposals are excluded. Human edits and regenerated wording retain their separate verification paths because they introduce new text.
 
 These are state transitions, not just prompt calls, which is why LangGraph is used as the orchestration layer.
 
@@ -445,7 +447,7 @@ Cloud deployment is deliberately deferred. The project proves deployment readine
 
 ## 15. Testing strategy
 
-The current verified baseline is **428 passed, 9 skipped**.
+The current verified baseline is **432 passed, 9 skipped**.
 
 The suite covers:
 
