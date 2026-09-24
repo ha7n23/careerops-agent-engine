@@ -1,6 +1,7 @@
 """LangChain implementation of the CareerOps evidence agent."""
 
 from collections.abc import Sequence
+from json import dumps
 from typing import Any, cast
 
 from langchain.agents import create_agent
@@ -30,11 +31,14 @@ from careerops_agent_engine.application.ports.evidence_repository import (
     EvidenceRepository,
 )
 from careerops_agent_engine.application.services.evidence_validation import (
-    validate_evidence_discovery_result,
+    validate_evidence_discovery_batch,
 )
 from careerops_agent_engine.core.config import Settings
 from careerops_agent_engine.domain.enums import MatchStrength
-from careerops_agent_engine.domain.models.evidence import EvidenceMatch
+from careerops_agent_engine.domain.models.evidence import (
+    EvidenceMatch,
+    EvidenceMatchBatch,
+)
 from careerops_agent_engine.domain.models.job import JobRequirement
 from careerops_agent_engine.infrastructure.llm.agent_trajectory import (
     inspect_evidence_agent_trajectory,
@@ -61,6 +65,40 @@ def build_empty_registry_match(
     )
 
 
+def build_model_limit_match(
+    requirement: JobRequirement,
+) -> EvidenceMatch:
+    """Create a fail-closed gap when the batch model budget is exhausted."""
+
+    return EvidenceMatch(
+        requirement_id=requirement.requirement_id,
+        match_strength=MatchStrength.NONE,
+        direct_evidence_ids=[],
+        related_evidence_ids=[],
+        explanation=(
+            "Evidence discovery reached its bounded model-call limit "
+            "before a supported match could be completed."
+        ),
+        gap=True,
+    )
+
+
+def build_requirement_batch_prompt(
+    requirements: Sequence[JobRequirement],
+) -> str:
+    """Serialize one untrusted requirement batch inside clear delimiters."""
+
+    payload = [requirement.model_dump(mode="json") for requirement in requirements]
+
+    return (
+        "Analyse the following job requirement batch and return "
+        "exactly one evidence match for every requirement.\n\n"
+        "<job_requirements>\n"
+        f"{dumps(payload, indent=2)}\n"
+        "</job_requirements>"
+    )
+
+
 class LangChainEvidenceDiscoveryAgent:
     """Bounded tool-calling agent for approved career evidence."""
 
@@ -72,7 +110,7 @@ class LangChainEvidenceDiscoveryAgent:
         model: BaseChatModel,
         model_name: str,
     ) -> None:
-        """Create the tools and bounded agent harness."""
+        """Create the tools and bounded batch-agent harness."""
 
         tools = create_evidence_tools(repository)
 
@@ -112,7 +150,7 @@ class LangChainEvidenceDiscoveryAgent:
             tools=tools,
             system_prompt=EVIDENCE_DISCOVERY_SYSTEM_PROMPT,
             response_format=ToolStrategy(
-                schema=EvidenceMatch,
+                schema=EvidenceMatchBatch,
             ),
             context_schema=EvidenceAgentContext,
             middleware=middleware,
@@ -129,7 +167,7 @@ class LangChainEvidenceDiscoveryAgent:
         *,
         user_id: str,
     ) -> list[EvidenceMatch]:
-        """Discover matches with an empty-registry fast path."""
+        """Discover all matches through at most one bounded agent run."""
 
         requirement_list = list(requirements)
 
@@ -149,13 +187,10 @@ class LangChainEvidenceDiscoveryAgent:
                 for requirement in requirement_list
             ]
 
-        return [
-            self.discover(
-                requirement,
-                user_id=user_id,
-            )
-            for requirement in requirement_list
-        ]
+        return self._discover_batch(
+            requirement_list,
+            user_id=user_id,
+        )
 
     def discover(
         self,
@@ -163,7 +198,25 @@ class LangChainEvidenceDiscoveryAgent:
         *,
         user_id: str,
     ) -> EvidenceMatch:
-        """Find and deterministically validate supporting evidence."""
+        """Discover one match through the shared batch implementation."""
+
+        return self._discover_batch(
+            [requirement],
+            user_id=user_id,
+        )[0]
+
+    def _discover_batch(
+        self,
+        requirements: Sequence[JobRequirement],
+        *,
+        user_id: str,
+    ) -> list[EvidenceMatch]:
+        """Run and deterministically validate one requirement batch."""
+
+        requirement_list = list(requirements)
+
+        if not requirement_list:
+            return []
 
         try:
             result: dict[str, Any] = self._agent.invoke(
@@ -171,28 +224,23 @@ class LangChainEvidenceDiscoveryAgent:
                     "messages": [
                         {
                             "role": "user",
-                            "content": (
-                                "Analyse the following single job "
-                                "requirement.\n\n"
-                                "<job_requirement>\n"
-                                f"{requirement.model_dump_json(indent=2)}\n"
-                                "</job_requirement>"
-                            ),
+                            "content": build_requirement_batch_prompt(requirement_list),
                         }
                     ]
                 },
                 context=EvidenceAgentContext(user_id=user_id),
                 config={
                     **build_langsmith_run_config(
-                        run_name="discover_requirement_evidence",
+                        run_name=("discover_requirement_evidence_batch"),
                         tags=[
                             "evidence-discovery",
+                            "batch",
                             "tool-calling-agent",
                             "llm",
                         ],
                         metadata={
-                            "component": "evidence_discovery_agent",
-                            "requirement_id": requirement.requirement_id,
+                            "component": ("evidence_discovery_agent"),
+                            "requirement_count": len(requirement_list),
                             "prompt_version": PROMPT_VERSION,
                             "ls_model_name": self._model_name,
                         },
@@ -201,33 +249,24 @@ class LangChainEvidenceDiscoveryAgent:
                 },
             )
         except ModelCallLimitExceededError:
-            return EvidenceMatch(
-                requirement_id=requirement.requirement_id,
-                match_strength=MatchStrength.NONE,
-                direct_evidence_ids=[],
-                related_evidence_ids=[],
-                explanation=(
-                    "Evidence discovery reached its bounded model-call limit "
-                    "before a supported match could be completed."
-                ),
-                gap=True,
-            )
+            return [
+                build_model_limit_match(requirement) for requirement in requirement_list
+            ]
 
-        match = EvidenceMatch.model_validate(result.get("structured_response"))
+        batch = EvidenceMatchBatch.model_validate(result.get("structured_response"))
 
         messages = cast(
             list[BaseMessage],
             result.get("messages", []),
         )
+
         trajectory = inspect_evidence_agent_trajectory(messages)
 
-        validate_evidence_discovery_result(
-            requirement=requirement,
-            match=match,
+        return validate_evidence_discovery_batch(
+            requirements=requirement_list,
+            matches=batch.matches,
             called_tools=trajectory.called_tools,
             observed_evidence_ids=(trajectory.observed_evidence_ids),
             repository=self._repository,
             user_id=user_id,
         )
-
-        return match

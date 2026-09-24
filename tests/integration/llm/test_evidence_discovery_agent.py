@@ -1,5 +1,6 @@
-"""Live tests for the bounded LLM evidence agent."""
+"""Live tests for the bounded batched LLM evidence agent."""
 
+import json
 import os
 
 import pytest
@@ -30,8 +31,8 @@ pytestmark = pytest.mark.integration
     os.getenv("RUN_LIVE_LLM_TESTS") != "true",
     reason="Live LLM tests are disabled.",
 )
-def test_docker_is_related_not_direct_kubernetes_evidence() -> None:
-    """The configured model must preserve the Docker/Kubernetes distinction."""
+def test_batched_docker_and_kubernetes_evidence_discovery() -> None:
+    """One batch must distinguish direct from related evidence."""
 
     repository = InMemoryEvidenceRepository(
         {
@@ -65,19 +66,51 @@ def test_docker_is_related_not_direct_kubernetes_evidence() -> None:
 
     runner = create_evidence_discovery_runner(repository)
 
-    match = runner.discover(
-        JobRequirement(
-            requirement_id="REQ-KUBERNETES",
-            name="Kubernetes",
-            category=RequirementCategory.DESIRABLE,
-            evidence_expected=("Exposure to Kubernetes container orchestration."),
-            importance_score=2,
-            source_text=("Exposure to Kubernetes is beneficial."),
-        ),
+    matches = runner.discover_for_requirements(
+        [
+            JobRequirement(
+                requirement_id="REQ-DOCKER",
+                name="Docker",
+                category=RequirementCategory.ESSENTIAL,
+                evidence_expected=(
+                    "Experience containerising applications with Docker."
+                ),
+                importance_score=4,
+                source_text=("Docker containerisation experience is required."),
+            ),
+            JobRequirement(
+                requirement_id="REQ-KUBERNETES",
+                name="Kubernetes",
+                category=RequirementCategory.DESIRABLE,
+                evidence_expected=("Exposure to Kubernetes container orchestration."),
+                importance_score=2,
+                source_text=("Exposure to Kubernetes is beneficial."),
+            ),
+        ],
         user_id="USER-INTEGRATION",
     )
 
-    assert match.match_strength is MatchStrength.RELATED
-    assert match.direct_evidence_ids == []
-    assert match.related_evidence_ids == ["EVD-DOCKER"]
-    assert match.gap is True
+    print(
+        "Live batched evidence matches:\n"
+        + json.dumps(
+            [match.model_dump(mode="json") for match in matches],
+            indent=2,
+        )
+    )
+
+    assert [match.requirement_id for match in matches] == [
+        "REQ-DOCKER",
+        "REQ-KUBERNETES",
+    ]
+
+    docker_match, kubernetes_match = matches
+
+    assert docker_match.match_strength is MatchStrength.STRONG
+    assert docker_match.direct_evidence_ids == ["EVD-DOCKER"]
+    assert docker_match.related_evidence_ids == []
+    assert docker_match.gap is False
+
+    assert kubernetes_match.match_strength is MatchStrength.RELATED
+    assert kubernetes_match.direct_evidence_ids == []
+    assert kubernetes_match.related_evidence_ids == ["EVD-DOCKER"]
+    assert kubernetes_match.gap is True

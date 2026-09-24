@@ -213,3 +213,22 @@ class EvidenceMatch(DomainModel):
                 raise ValueError("A no-match result must be marked as a gap.")
 
         return self
+
+
+class EvidenceMatchBatch(DomainModel):
+    """Structured evidence matches returned for one requirement batch."""
+
+    matches: list[EvidenceMatch] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_unique_requirement_ids(self) -> Self:
+        """Require at most one match for each requirement."""
+
+        requirement_ids = [match.requirement_id for match in self.matches]
+
+        if len(requirement_ids) != len(set(requirement_ids)):
+            raise ValueError(
+                "Batch evidence matches must have unique requirement identifiers."
+            )
+
+        return self
