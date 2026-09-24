@@ -205,6 +205,8 @@ This makes the agent useful for semantic search/reasoning without giving it auth
 
 Before running evidence discovery for a requirement set, the runner performs one bounded approved-evidence existence check. If the authenticated user has no approved Evidence Registry entries, CareerOps returns one deterministic `MatchStrength.NONE` gap per requirement without invoking the tool-calling model. Before running evidence discovery for a requirement set, the runner performs one bounded approved-evidence existence check. If the authenticated user has no approved Evidence Registry entries, CareerOps returns one deterministic `MatchStrength.NONE` gap per requirement without invoking the tool-calling model. Users with approved evidence are processed through one bounded batch agent run. The agent performs a minimal set of combined searches and returns exactly one match per requirement. Deterministic application validation rejects missing, duplicate, unknown, unobserved, inaccessible, or cross-user evidence references and restores the original requirement order.
 
+The approved Evidence Registry is also exposed through read-only, authenticated API endpoints for downstream gateways and frontends. Listing is bounded and user scoped; individual retrieval uses the same opaque `404` response for unknown and cross-user identifiers. Pending or rejected evidence is never exposed through this interface.
+
 ## 6. Requirement extraction and deterministic fit scoring
 
 Job descriptions are treated as **untrusted document content**. The current requirement prompt explicitly instructs the model not to follow instructions embedded inside the posting and to extract only supported requirements.
@@ -447,7 +449,7 @@ Cloud deployment is deliberately deferred. The project proves deployment readine
 
 ## 15. Testing strategy
 
-The current verified baseline is **440 passed, 9 skipped**.
+The current verified baseline is **450 passed, 9 skipped**.
 
 The suite covers:
 
@@ -463,7 +465,7 @@ The suite covers:
 
 The nine default skips are explicit live LLM or live document-runtime tests gated behind environment flags. This keeps ordinary CI deterministic while retaining opt-in real-provider/runtime proofs.
 
-Strict mypy currently checks **149 source files**; Ruff covers `src` and `tests`.
+Strict mypy currently checks **152 source files**; Ruff covers `src` and `tests`.
 
 ## 16. Trade-offs and extension points
 

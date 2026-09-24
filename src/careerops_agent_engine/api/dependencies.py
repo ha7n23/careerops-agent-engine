@@ -71,6 +71,9 @@ from careerops_agent_engine.application.services.cv_proposals import (
 from careerops_agent_engine.application.services.cv_version_builder import (
     CVVersionBuilder,
 )
+from careerops_agent_engine.application.services.evidence_registry import (
+    EvidenceRegistryService,
+)
 from careerops_agent_engine.application.services.final_cv_assembly import (
     FinalCVAssemblyService,
 )
@@ -162,6 +165,13 @@ def get_evidence_repository() -> EvidenceRepository:
     """Create the PostgreSQL approved-evidence repository."""
 
     return SqlAlchemyEvidenceRepository(get_database_session_factory())
+
+
+@lru_cache
+def get_evidence_registry_service() -> EvidenceRegistryService:
+    """Create the read-only approved-evidence service."""
+
+    return EvidenceRegistryService(get_evidence_repository())
 
 
 @lru_cache
