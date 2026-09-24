@@ -7,10 +7,15 @@ from typing import Any
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from careerops_agent_engine.agents.prompts.cv_proposal import (
+    BATCH_PROMPT_VERSION,
+    CV_PROPOSAL_BATCH_PROMPT,
     CV_PROPOSAL_PROMPT,
     CV_PROPOSAL_REGENERATION_PROMPT,
     PROMPT_VERSION,
     REGENERATION_PROMPT_VERSION,
+)
+from careerops_agent_engine.application.ports.cv_proposal_generator import (
+    CVProposalGenerationRequest,
 )
 from careerops_agent_engine.domain.models.cv import (
     CVChangeProposal,
@@ -21,6 +26,8 @@ from careerops_agent_engine.domain.models.evidence import (
 )
 from careerops_agent_engine.domain.models.job import JobRequirement
 from careerops_agent_engine.infrastructure.llm.schemas import (
+    GeneratedCVProposalBatch,
+    GeneratedCVProposalBatchItem,
     GeneratedCVProposalContent,
     ProposalEvidenceContext,
 )
@@ -44,6 +51,10 @@ class LangChainCVProposalGenerator:
             schema=GeneratedCVProposalContent.model_json_schema(),
             method="json_schema",
         )
+        self._batch_structured_model = model.with_structured_output(
+            schema=GeneratedCVProposalBatch.model_json_schema(),
+            method="json_schema",
+        )
         self._model_name = model_name
 
     def generate(
@@ -56,6 +67,8 @@ class LangChainCVProposalGenerator:
         approved_evidence: Sequence[CareerEvidence],
     ) -> CVChangeProposal:
         """Generate one proposal from validated direct evidence."""
+
+        del job_id
 
         evidence_context = build_evidence_context(approved_evidence)
 
@@ -81,6 +94,118 @@ class LangChainCVProposalGenerator:
             generated=generated,
         )
 
+    def generate_batch(
+        self,
+        *,
+        job_id: str,
+        requests: Sequence[CVProposalGenerationRequest],
+    ) -> list[CVChangeProposal]:
+        """Generate multiple grounded proposals through one model invocation."""
+
+        del job_id
+
+        request_list = list(requests)
+
+        if not request_list:
+            return []
+
+        requests_by_requirement: dict[
+            str,
+            CVProposalGenerationRequest,
+        ] = {}
+        request_context: list[dict[str, Any]] = []
+
+        for request in request_list:
+            requirement_id = request.requirement.requirement_id
+
+            if requirement_id in requests_by_requirement:
+                raise ValueError(
+                    "Batch proposal requests require unique requirement identifiers."
+                )
+
+            if request.evidence_match.requirement_id != requirement_id:
+                raise ValueError(
+                    "Batch proposal request contains mismatched "
+                    "requirement and evidence-match identifiers."
+                )
+
+            requests_by_requirement[requirement_id] = request
+
+            evidence_context = build_evidence_context(
+                request.approved_evidence,
+            )
+
+            request_context.append(
+                {
+                    "requirement_id": requirement_id,
+                    "requirement": request.requirement.model_dump(
+                        mode="json",
+                    ),
+                    "evidence_match": request.evidence_match.model_dump(
+                        mode="json",
+                    ),
+                    "approved_evidence": [
+                        context.model_dump(mode="json") for context in evidence_context
+                    ],
+                }
+            )
+
+        messages = CV_PROPOSAL_BATCH_PROMPT.format_messages(
+            proposal_requests=json.dumps(
+                request_context,
+                indent=2,
+            )
+        )
+
+        raw_result: Any = self._batch_structured_model.invoke(
+            messages,
+            config=build_langsmith_run_config(
+                run_name="generate_cv_proposal_batch",
+                tags=[
+                    "cv-proposal",
+                    "batch",
+                    "structured-output",
+                    "llm",
+                ],
+                metadata={
+                    "component": "cv_proposal_generator",
+                    "prompt_version": BATCH_PROMPT_VERSION,
+                    "ls_model_name": self._model_name,
+                },
+            ),
+        )
+
+        generated_batch = GeneratedCVProposalBatch.model_validate(raw_result)
+
+        generated_by_requirement: dict[
+            str,
+            GeneratedCVProposalBatchItem,
+        ] = {}
+
+        for generated in generated_batch.proposals:
+            if generated.requirement_id in generated_by_requirement:
+                raise ValueError(
+                    "Batch proposal response contains duplicate "
+                    "requirement identifiers."
+                )
+
+            generated_by_requirement[generated.requirement_id] = generated
+
+        if set(generated_by_requirement) != set(requests_by_requirement):
+            raise ValueError(
+                "Batch proposal response must contain exactly one "
+                "proposal per requested requirement."
+            )
+
+        return [
+            build_domain_proposal(
+                proposal_id=request.proposal_id,
+                requirement=request.requirement,
+                generated=generated_by_requirement[request.requirement.requirement_id],
+            )
+            for request in request_list
+        ]
+
     def regenerate(
         self,
         *,
@@ -94,11 +219,13 @@ class LangChainCVProposalGenerator:
     ) -> CVChangeProposal:
         """Regenerate a proposal using grounded human feedback."""
 
+        del job_id
+
         evidence_context = build_evidence_context(approved_evidence)
 
         messages = CV_PROPOSAL_REGENERATION_PROMPT.format_messages(
             requirement=requirement.model_dump_json(indent=2),
-            evidence_match=(evidence_match.model_dump_json(indent=2)),
+            evidence_match=evidence_match.model_dump_json(indent=2),
             approved_evidence=json.dumps(
                 [context.model_dump(mode="json") for context in evidence_context],
                 indent=2,
@@ -111,7 +238,7 @@ class LangChainCVProposalGenerator:
             messages=messages,
             run_name="regenerate_cv_proposal",
             requirement=requirement,
-            prompt_version=(REGENERATION_PROMPT_VERSION),
+            prompt_version=REGENERATION_PROMPT_VERSION,
         )
 
         return build_domain_proposal(
@@ -140,10 +267,10 @@ class LangChainCVProposalGenerator:
                     "llm",
                 ],
                 metadata={
-                    "component": ("cv_proposal_generator"),
-                    "requirement_id": (requirement.requirement_id),
-                    "prompt_version": (prompt_version),
-                    "ls_model_name": (self._model_name),
+                    "component": "cv_proposal_generator",
+                    "requirement_id": requirement.requirement_id,
+                    "prompt_version": prompt_version,
+                    "ls_model_name": self._model_name,
                 },
             ),
         )

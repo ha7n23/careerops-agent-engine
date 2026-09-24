@@ -7,6 +7,9 @@ import pytest
 from careerops_agent_engine.application.exceptions import (
     CVProposalValidationError,
 )
+from careerops_agent_engine.application.ports.cv_proposal_generator import (
+    CVProposalGenerationRequest,
+)
 from careerops_agent_engine.application.services.cv_proposals import (
     CVProposalGenerationService,
     build_proposal_id,
@@ -120,6 +123,25 @@ class FakeCVProposalGenerator:
             confidence_score=0.95,
             warnings=[],
         )
+
+    def generate_batch(
+        self,
+        *,
+        job_id: str,
+        requests: Sequence[CVProposalGenerationRequest],
+    ) -> list[CVChangeProposal]:
+        """Return deterministic proposals for one simulated batch call."""
+
+        return [
+            self.generate(
+                proposal_id=request.proposal_id,
+                job_id=job_id,
+                requirement=request.requirement,
+                evidence_match=request.evidence_match,
+                approved_evidence=request.approved_evidence,
+            )
+            for request in requests
+        ]
 
     def regenerate(
         self,

@@ -1,11 +1,13 @@
 """Application service for grounded CV proposal generation."""
 
+from collections.abc import Sequence
 from hashlib import sha256
 
 from careerops_agent_engine.application.exceptions import (
     CVProposalValidationError,
 )
 from careerops_agent_engine.application.ports.cv_proposal_generator import (
+    CVProposalGenerationRequest,
     CVProposalGenerator,
 )
 from careerops_agent_engine.application.ports.evidence_repository import (
@@ -85,6 +87,125 @@ class CVProposalGenerationService:
         )
 
         return proposal
+
+    def generate_for_requirements(
+        self,
+        *,
+        job_id: str,
+        user_id: str,
+        requirements: Sequence[JobRequirement],
+        evidence_matches: Sequence[EvidenceMatch],
+    ) -> list[CVChangeProposal]:
+        """Generate all eligible initial proposals through one batch call."""
+
+        requirement_list = list(requirements)
+        match_list = list(evidence_matches)
+
+        requirement_ids = [
+            requirement.requirement_id for requirement in requirement_list
+        ]
+
+        if len(requirement_ids) != len(set(requirement_ids)):
+            raise CVProposalValidationError(
+                "Batch proposal generation requires unique requirement identifiers."
+            )
+
+        matches_by_requirement: dict[str, EvidenceMatch] = {}
+
+        for evidence_match in match_list:
+            if evidence_match.requirement_id in matches_by_requirement:
+                raise CVProposalValidationError(
+                    "Batch proposal generation received duplicate evidence matches."
+                )
+
+            matches_by_requirement[evidence_match.requirement_id] = evidence_match
+
+        if set(matches_by_requirement) != set(requirement_ids):
+            raise CVProposalValidationError(
+                "Batch proposal generation requires exactly one "
+                "evidence match per requirement."
+            )
+
+        generation_requests: list[CVProposalGenerationRequest] = []
+        allowed_evidence_ids_by_proposal: dict[
+            str,
+            set[str],
+        ] = {}
+
+        for requirement in requirement_list:
+            evidence_match = matches_by_requirement[requirement.requirement_id]
+
+            self._validate_requirement_match(
+                requirement=requirement,
+                evidence_match=evidence_match,
+            )
+
+            if evidence_match.match_strength not in ELIGIBLE_MATCH_STRENGTHS:
+                continue
+
+            direct_evidence = self._load_direct_evidence(
+                user_id=user_id,
+                evidence_match=evidence_match,
+            )
+            proposal_id = build_proposal_id(
+                job_id=job_id,
+                requirement_id=requirement.requirement_id,
+            )
+
+            generation_requests.append(
+                CVProposalGenerationRequest(
+                    proposal_id=proposal_id,
+                    requirement=requirement,
+                    evidence_match=evidence_match,
+                    approved_evidence=tuple(direct_evidence),
+                )
+            )
+            allowed_evidence_ids_by_proposal[proposal_id] = {
+                evidence.evidence_id for evidence in direct_evidence
+            }
+
+        if not generation_requests:
+            return []
+
+        generated_proposals = self._generator.generate_batch(
+            job_id=job_id,
+            requests=generation_requests,
+        )
+
+        proposals_by_id: dict[str, CVChangeProposal] = {}
+
+        for proposal in generated_proposals:
+            if proposal.proposal_id in proposals_by_id:
+                raise CVProposalValidationError(
+                    "Batch proposal generation returned duplicate proposal identifiers."
+                )
+
+            proposals_by_id[proposal.proposal_id] = proposal
+
+        expected_proposal_ids = {request.proposal_id for request in generation_requests}
+
+        if set(proposals_by_id) != expected_proposal_ids:
+            raise CVProposalValidationError(
+                "Batch proposal generation must return exactly one "
+                "proposal per eligible requirement."
+            )
+
+        validated_proposals: list[CVChangeProposal] = []
+
+        for request in generation_requests:
+            proposal = proposals_by_id[request.proposal_id]
+
+            validate_cv_proposal(
+                proposal=proposal,
+                expected_proposal_id=request.proposal_id,
+                requirement=request.requirement,
+                allowed_evidence_ids=(
+                    allowed_evidence_ids_by_proposal[request.proposal_id]
+                ),
+            )
+            validated_proposals.append(proposal)
+
+        return validated_proposals
 
     def regenerate_for_requirement(
         self,

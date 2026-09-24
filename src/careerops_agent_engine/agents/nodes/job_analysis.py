@@ -183,7 +183,7 @@ def calculate_fit(
 def create_generate_cv_proposals_node(
     proposal_service: CVProposalGenerationService,
 ) -> Callable[[JobAnalysisState], JobAnalysisUpdate]:
-    """Generate proposals only for directly supported requirements."""
+    """Generate eligible proposals through one bounded batch call."""
 
     def generate_cv_proposals(
         state: JobAnalysisState,
@@ -192,36 +192,17 @@ def create_generate_cv_proposals_node(
             JobRequirement.model_validate(payload)
             for payload in state.get("requirements", [])
         ]
-
         evidence_matches = [
             EvidenceMatch.model_validate(payload)
             for payload in state.get("evidence_matches", [])
         ]
 
-        matches_by_requirement = {
-            match.requirement_id: match for match in evidence_matches
-        }
-
-        proposals: list[CVChangeProposal] = []
-
-        for requirement in requirements:
-            evidence_match = matches_by_requirement.get(requirement.requirement_id)
-
-            if evidence_match is None:
-                raise ValueError(
-                    "Missing evidence match for requirement: "
-                    f"{requirement.requirement_id}"
-                )
-
-            proposal = proposal_service.generate_for_requirement(
-                job_id=state["job_id"],
-                user_id=state["user_id"],
-                requirement=requirement,
-                evidence_match=evidence_match,
-            )
-
-            if proposal is not None:
-                proposals.append(proposal)
+        proposals = proposal_service.generate_for_requirements(
+            job_id=state["job_id"],
+            user_id=state["user_id"],
+            requirements=requirements,
+            evidence_matches=evidence_matches,
+        )
 
         return {
             "cv_proposals": [

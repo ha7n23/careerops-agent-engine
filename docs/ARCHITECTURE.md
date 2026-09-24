@@ -220,6 +220,8 @@ After evidence discovery, fit is calculated deterministically from requirement i
 
 For each supported requirement, CareerOps can generate a `CVChangeProposal` using only approved evidence context.
 
+Initial proposal generation is batched across all eligible requirements, reducing N quality-model calls to at most one. Each batch item carries its requirement identifier, but deterministic application code attaches stable proposal IDs, verifies that the response contains exactly one result per requested requirement, restores request ordering, and checks every cited evidence ID against that requirement’s approved direct-evidence context. Human-requested regeneration remains targeted to individual proposals, and claim verification remains a separate model-backed safety step.
+
 Before a proposal is shown to a human, a separate claim-verification step assesses the factual statements against approved evidence. The application service validates the verification result and splits proposal IDs into:
 
 - **reviewable** — fully supported proposals;
@@ -439,7 +441,7 @@ Cloud deployment is deliberately deferred. The project proves deployment readine
 
 ## 15. Testing strategy
 
-The current verified baseline is **406 passed, 9 skipped**.
+The current verified baseline is **415 passed, 9 skipped**.
 
 The suite covers:
 

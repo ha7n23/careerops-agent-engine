@@ -1,5 +1,6 @@
-"""Live integration test for grounded CV proposal generation."""
+"""Live integration test for batched grounded CV proposal generation."""
 
+import json
 import os
 
 import pytest
@@ -34,8 +35,8 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def test_live_grounded_cv_proposal() -> None:
-    """Generate one real proposal from approved PostgreSQL evidence."""
+def test_live_batched_grounded_cv_proposals() -> None:
+    """Generate two grounded proposals through one real batch call."""
 
     settings = get_settings()
 
@@ -45,8 +46,6 @@ def test_live_grounded_cv_proposal() -> None:
     repository = SqlAlchemyEvidenceRepository(session_factory)
 
     try:
-        # Verify our expected seeded evidence exists before making
-        # an external model call.
         careerops_evidence = repository.get_approved(
             user_id=DEVELOPMENT_USER_ID,
             evidence_id="EVD-DEMO-CAREEROPS",
@@ -59,7 +58,7 @@ def test_live_grounded_cv_proposal() -> None:
         assert careerops_evidence is not None
         assert aws_evidence is not None
 
-        requirement = JobRequirement(
+        python_requirement = JobRequirement(
             requirement_id="REQ-LIVE-PYTHON",
             name="Python Software Engineering",
             category=RequirementCategory.ESSENTIAL,
@@ -69,9 +68,17 @@ def test_live_grounded_cv_proposal() -> None:
             importance_score=5,
             source_text=("Strong Python software-engineering experience is required."),
         )
+        aws_requirement = JobRequirement(
+            requirement_id="REQ-LIVE-AWS",
+            name="AWS Deployment",
+            category=RequirementCategory.DESIRABLE,
+            evidence_expected=("Experience deploying applications to AWS."),
+            importance_score=3,
+            source_text="AWS deployment experience is desirable.",
+        )
 
-        evidence_match = EvidenceMatch(
-            requirement_id=requirement.requirement_id,
+        python_match = EvidenceMatch(
+            requirement_id=python_requirement.requirement_id,
             match_strength=MatchStrength.STRONG,
             direct_evidence_ids=[
                 "EVD-DEMO-CAREEROPS",
@@ -84,39 +91,79 @@ def test_live_grounded_cv_proposal() -> None:
             ),
             gap=False,
         )
+        aws_match = EvidenceMatch(
+            requirement_id=aws_requirement.requirement_id,
+            match_strength=MatchStrength.STRONG,
+            direct_evidence_ids=[
+                "EVD-DEMO-AWS",
+            ],
+            related_evidence_ids=[],
+            explanation=(
+                "Approved AWS evidence directly demonstrates application deployment."
+            ),
+            gap=False,
+        )
 
         service = CVProposalGenerationService(
             repository=repository,
             generator=create_cv_proposal_generator(settings),
         )
 
-        proposal = service.generate_for_requirement(
-            job_id="JOB-LIVE-CV-PROPOSAL-001",
+        proposals = service.generate_for_requirements(
+            job_id="JOB-LIVE-CV-PROPOSAL-BATCH-001",
             user_id=DEVELOPMENT_USER_ID,
-            requirement=requirement,
-            evidence_match=evidence_match,
+            requirements=[
+                python_requirement,
+                aws_requirement,
+            ],
+            evidence_matches=[
+                python_match,
+                aws_match,
+            ],
         )
 
-        assert proposal is not None
-
         print()
-        print("Live CV proposal:")
-        print(proposal.model_dump_json(indent=2))
+        print("Live batched CV proposals:")
+        print(
+            json.dumps(
+                [proposal.model_dump(mode="json") for proposal in proposals],
+                indent=2,
+            )
+        )
 
-        assert proposal.requirement_ids == [requirement.requirement_id]
+        assert len(proposals) == 2
 
-        assert set(proposal.supporting_evidence_ids).issubset(
+        proposals_by_requirement = {
+            proposal.requirement_ids[0]: proposal for proposal in proposals
+        }
+
+        assert set(proposals_by_requirement) == {
+            "REQ-LIVE-PYTHON",
+            "REQ-LIVE-AWS",
+        }
+
+        assert set(
+            proposals_by_requirement["REQ-LIVE-PYTHON"].supporting_evidence_ids
+        ).issubset(
             {
                 "EVD-DEMO-CAREEROPS",
                 "EVD-DEMO-AWS",
             }
         )
+        assert set(
+            proposals_by_requirement["REQ-LIVE-AWS"].supporting_evidence_ids
+        ).issubset(
+            {
+                "EVD-DEMO-AWS",
+            }
+        )
 
-        assert proposal.supporting_evidence_ids
-        assert proposal.target_entry_id is None
-        assert proposal.current_text is None
-        assert proposal.requires_human_approval is True
-        assert proposal.proposed_text.strip()
+        for proposal in proposals:
+            assert proposal.supporting_evidence_ids
+            assert proposal.target_entry_id is None
+            assert proposal.current_text is None
+            assert proposal.requires_human_approval is True
+            assert proposal.proposed_text.strip()
 
     finally:
         engine.dispose()

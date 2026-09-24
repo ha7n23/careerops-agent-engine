@@ -68,6 +68,23 @@ class GeneratedCVProposalContent(DomainModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class GeneratedCVProposalBatchItem(GeneratedCVProposalContent):
+    """One generated proposal mapped to its requested requirement."""
+
+    requirement_id: str = Field(
+        min_length=1,
+        max_length=64,
+    )
+
+
+class GeneratedCVProposalBatch(DomainModel):
+    """Provider result containing one batch of generated proposals."""
+
+    proposals: list[GeneratedCVProposalBatchItem] = Field(
+        min_length=1,
+    )
+
+
 class GeneratedClaimAssessment(DomainModel):
     """Provider assessment of one factual claim."""
 
