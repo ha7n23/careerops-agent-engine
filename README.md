@@ -12,7 +12,7 @@ CareerOps Agent Engine is a portfolio-grade AI engineering project built around 
 - **Job-analysis graph:** extract requirements, use a bounded tool-calling agent to discover approved evidence, calculate a deterministic fit score, generate grounded CV proposals, verify factual claims, and pause for human review.
 - **Verified document output:** apply accepted changes to a structured CV, create an immutable version, render an ATS-friendly DOCX, convert it to PDF with LibreOffice, and deterministically verify both artifacts before download.
 - **Production-style engineering:** PostgreSQL persistence and LangGraph checkpoints, LangSmith tracing/evaluation with privacy masking, FastAPI security boundaries, Dockerised runtime, Alembic migrations, and GitHub Actions container integration.
-- **Current quality baseline:** **432 passing tests**, **9 opt-in live integration tests skipped by default**, Ruff clean, and strict mypy checks across **149 source files**.
+- **Current quality baseline:** **440 passing tests**, **9 opt-in live integration tests skipped by default**, Ruff clean, and strict mypy checks across **149 source files**.
 
 > For the deeper design, trust boundaries, workflow states, persistence model, and trade-offs, see [Architecture](docs/ARCHITECTURE.md).
 
@@ -207,6 +207,7 @@ See **[docs/architecture.md](docs/ARCHITECTURE.md)** for the graph topology, evi
 - Kept generation and verification as independent safety stages, while retaining targeted regeneration and reverification after human feedback.
 - Live-validated two grounded proposals from one generation call and independent supported/unsupported decisions from one verification call.
 - Added an empty Evidence Registry fast path that returns deterministic gaps for all requirements after one bounded repository check and zero evidence-agent calls.
+- Reduced approved-evidence discovery from one bounded tool-calling agent run per requirement to at most one batched run per job, while preserving the zero-call empty-registry path.
 
 ### 2026-09-23 — Provider-neutral Groq routing
 
@@ -226,4 +227,4 @@ See **[docs/architecture.md](docs/ARCHITECTURE.md)** for the graph topology, evi
 - Added regression coverage for bounded evidence-discovery failure handling.
 - Successfully validated authenticated service-to-service job analysis from the separate CareerOps Automation & MCP Hub over the public HTTP API.
 
-Current quality baseline: **432 passed, 9 skipped**, Ruff clean, strict mypy clean across **149 source files**.
+Current quality baseline: **440 passed, 9 skipped**, Ruff clean, strict mypy clean across **149 source files**.

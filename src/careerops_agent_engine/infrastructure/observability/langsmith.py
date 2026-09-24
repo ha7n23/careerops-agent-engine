@@ -15,6 +15,7 @@ SAFE_LANGSMITH_METADATA_KEYS = frozenset(
         "prompt_version",
         "ls_model_name",
         "requirement_id",
+        "requirement_count",
         "proposal_id",
         "document_id",
     }
