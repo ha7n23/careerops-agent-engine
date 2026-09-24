@@ -5,6 +5,10 @@ class EvidenceDiscoveryValidationError(ValueError):
     """Evidence-agent output failed deterministic validation."""
 
 
+class CareerEvidenceUnavailableError(ValueError):
+    """An approved evidence record cannot be accessed by the user."""
+
+
 class CVProposalValidationError(ValueError):
     """Generated CV proposal failed deterministic validation."""
 
