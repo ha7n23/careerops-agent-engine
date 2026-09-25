@@ -19,6 +19,34 @@ from careerops_agent_engine.domain.models.evidence_review import (
 )
 
 
+class CVEvidenceReviewRunSummary(DomainModel):
+    """Frontend-safe summary of one CV evidence-review run."""
+
+    review_run_id: str = Field(
+        min_length=1,
+        max_length=64,
+    )
+
+    document_id: str = Field(
+        min_length=1,
+        max_length=64,
+    )
+
+    status: CVEvidenceReviewRunStatus
+
+    proposal_count: int = Field(
+        ge=0,
+    )
+
+    approved_evidence_count: int = Field(
+        ge=0,
+    )
+
+    created_at: datetime
+
+    updated_at: datetime
+
+
 class CVEvidenceReviewRunSnapshot(DomainModel):
     """Latest business snapshot of one CV evidence-review run."""
 

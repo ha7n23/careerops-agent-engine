@@ -461,3 +461,72 @@ def test_review_history_is_user_scoped(
         )
         == []
     )
+
+
+def test_review_run_summaries_are_bounded_newest_first_and_user_scoped(
+    repositories: tuple[
+        SqlAlchemyCVEvidenceAuditRepository,
+        SqlAlchemyCareerDocumentRepository,
+        SqlAlchemyEvidenceRepository,
+    ],
+) -> None:
+    """Review history should be bounded and remain inside its user scope."""
+
+    audit_repository, _, _ = repositories
+
+    first_snapshot = build_awaiting_snapshot()
+
+    second_snapshot = build_awaiting_snapshot().model_copy(
+        update={"review_run_id": "EVR-002"}
+    )
+
+    audit_repository.save_run(first_snapshot)
+    audit_repository.save_run(second_snapshot)
+
+    summaries = audit_repository.list_run_summaries(
+        user_id="USER-001",
+        limit=1,
+    )
+
+    assert len(summaries) == 1
+    assert summaries[0].review_run_id == "EVR-002"
+    assert summaries[0].document_id == "DOC-001"
+    assert summaries[0].proposal_count == 1
+    assert summaries[0].approved_evidence_count == 0
+    assert summaries[0].created_at is not None
+    assert summaries[0].updated_at is not None
+
+    assert (
+        audit_repository.list_run_summaries(
+            user_id="USER-OTHER",
+            limit=10,
+        )
+        == []
+    )
+
+
+def test_completed_review_summary_counts_approved_evidence(
+    repositories: tuple[
+        SqlAlchemyCVEvidenceAuditRepository,
+        SqlAlchemyCareerDocumentRepository,
+        SqlAlchemyEvidenceRepository,
+    ],
+) -> None:
+    """Completed history should expose proposal and approval counts."""
+
+    audit_repository, _, _ = repositories
+
+    audit_repository.save_review_result(
+        snapshot=build_completed_snapshot(),
+        review=build_review(),
+    )
+
+    summaries = audit_repository.list_run_summaries(
+        user_id="USER-001",
+        limit=10,
+    )
+
+    assert len(summaries) == 1
+    assert summaries[0].status is CVEvidenceReviewRunStatus.COMPLETED
+    assert summaries[0].proposal_count == 1
+    assert summaries[0].approved_evidence_count == 1

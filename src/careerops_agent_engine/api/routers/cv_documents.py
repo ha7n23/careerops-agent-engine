@@ -7,6 +7,7 @@ from fastapi import (
     Depends,
     File,
     HTTPException,
+    Query,
     UploadFile,
     status,
 )
@@ -14,9 +15,11 @@ from fastapi import (
 from careerops_agent_engine.api.dependencies import (
     get_authenticated_user_id,
     get_cv_document_ingestion_service,
+    get_cv_evidence_history_service,
     get_cv_evidence_workflow_service,
 )
 from careerops_agent_engine.api.schemas.cv_documents import (
+    CareerDocumentHistoryResponse,
     CareerDocumentUploadResponse,
     CVEvidenceReviewRunResponse,
 )
@@ -28,6 +31,10 @@ from careerops_agent_engine.application.exceptions import (
 )
 from careerops_agent_engine.application.services.cv_document_ingestion import (
     CVDocumentIngestionService,
+)
+from careerops_agent_engine.application.services.cv_evidence_history import (
+    DEFAULT_HISTORY_LIMIT,
+    CVEvidenceHistoryService,
 )
 from careerops_agent_engine.application.services.cv_evidence_workflow import (
     CVEvidenceWorkflowService,
@@ -52,6 +59,38 @@ AuthenticatedUserIdDependency = Annotated[
     str,
     Depends(get_authenticated_user_id),
 ]
+
+CVEvidenceHistoryServiceDependency = Annotated[
+    CVEvidenceHistoryService,
+    Depends(get_cv_evidence_history_service),
+]
+
+
+@router.get(
+    "",
+    response_model=CareerDocumentHistoryResponse,
+    status_code=status.HTTP_200_OK,
+    summary="List uploaded CV documents",
+)
+def list_cv_documents(
+    service: CVEvidenceHistoryServiceDependency,
+    user_id: AuthenticatedUserIdDependency,
+    limit: Annotated[
+        int,
+        Query(ge=1, le=100),
+    ] = DEFAULT_HISTORY_LIMIT,
+) -> CareerDocumentHistoryResponse:
+    """List the authenticated user's newest uploaded CV documents."""
+
+    summaries = service.list_documents(
+        user_id=user_id,
+        limit=limit,
+    )
+
+    return CareerDocumentHistoryResponse.from_domain(
+        summaries,
+        limit=limit,
+    )
 
 
 @router.post(

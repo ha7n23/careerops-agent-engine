@@ -4,6 +4,7 @@ from typing import Protocol
 
 from careerops_agent_engine.domain.models.document import (
     CareerDocument,
+    CareerDocumentSummary,
 )
 
 
@@ -27,5 +28,19 @@ class CareerDocumentRepository(Protocol):
         document_id: str,
     ) -> CareerDocument | None:
         """Retrieve one document within its user boundary."""
+
+        ...
+
+
+class CareerDocumentHistoryRepository(Protocol):
+    """Query bounded user-owned document history."""
+
+    def list_summaries(
+        self,
+        *,
+        user_id: str,
+        limit: int,
+    ) -> list[CareerDocumentSummary]:
+        """Return the user's newest document summaries first."""
 
         ...
