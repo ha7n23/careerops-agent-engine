@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from careerops_agent_engine.application.ports.cv_evidence_audit_repository import (
     CVEvidenceAuditRepository,
+    CVEvidenceReviewHistoryRepository,
 )
 from careerops_agent_engine.domain.enums import (
     CVEvidenceReviewRunStatus,
@@ -18,6 +19,7 @@ from careerops_agent_engine.domain.models.evidence import (
 from careerops_agent_engine.domain.models.evidence_audit import (
     CVEvidenceReviewAuditEntry,
     CVEvidenceReviewRunSnapshot,
+    CVEvidenceReviewRunSummary,
 )
 from careerops_agent_engine.domain.models.evidence_review import (
     EvidenceReviewDecision,
@@ -36,7 +38,10 @@ from careerops_agent_engine.infrastructure.repositories.sqlalchemy_evidence impo
 )
 
 
-class SqlAlchemyCVEvidenceAuditRepository(CVEvidenceAuditRepository):
+class SqlAlchemyCVEvidenceAuditRepository(
+    CVEvidenceAuditRepository,
+    CVEvidenceReviewHistoryRepository,
+):
     """Persist review state and approved evidence atomically."""
 
     def __init__(
@@ -212,6 +217,29 @@ class SqlAlchemyCVEvidenceAuditRepository(CVEvidenceAuditRepository):
 
         return review_run_record_to_domain(record)
 
+    def list_run_summaries(
+        self,
+        *,
+        user_id: str,
+        limit: int,
+    ) -> list[CVEvidenceReviewRunSummary]:
+        """Return bounded review-run history inside the user boundary."""
+
+        statement = (
+            select(CVEvidenceReviewRunRecord)
+            .where(CVEvidenceReviewRunRecord.user_id == user_id)
+            .order_by(
+                CVEvidenceReviewRunRecord.created_at.desc(),
+                CVEvidenceReviewRunRecord.review_run_id.desc(),
+            )
+            .limit(limit)
+        )
+
+        with self._session_factory() as session:
+            records = session.execute(statement).scalars().all()
+
+        return [review_run_record_to_summary(record) for record in records]
+
 
 def validate_completed_review(
     *,
@@ -375,6 +403,30 @@ def review_run_record_to_domain(
             if record.review_result is not None
             else None
         ),
+    )
+
+
+def review_run_record_to_summary(
+    record: CVEvidenceReviewRunRecord,
+) -> CVEvidenceReviewRunSummary:
+    """Convert a persisted review run to a lightweight history summary."""
+
+    review_result = (
+        EvidenceReviewResult.model_validate(record.review_result)
+        if record.review_result is not None
+        else None
+    )
+
+    return CVEvidenceReviewRunSummary(
+        review_run_id=record.review_run_id,
+        document_id=record.document_id,
+        status=CVEvidenceReviewRunStatus(record.status),
+        proposal_count=len(record.proposals),
+        approved_evidence_count=(
+            len(review_result.approved_evidence) if review_result is not None else 0
+        ),
+        created_at=record.created_at,
+        updated_at=record.updated_at,
     )
 
 

@@ -1,5 +1,7 @@
 """Domain models for uploaded career documents."""
 
+from datetime import datetime
+
 from pydantic import Field
 
 from careerops_agent_engine.domain.enums import (
@@ -44,6 +46,32 @@ class CareerDocument(DomainModel):
     )
 
     status: CareerDocumentStatus
+
+
+class CareerDocumentSummary(DomainModel):
+    """Frontend-safe summary of one uploaded career document."""
+
+    document_id: str = Field(
+        min_length=1,
+        max_length=64,
+    )
+
+    original_filename: str = Field(
+        min_length=1,
+        max_length=255,
+    )
+
+    document_format: CareerDocumentFormat
+
+    size_bytes: int = Field(
+        ge=1,
+    )
+
+    status: CareerDocumentStatus
+
+    uploaded_at: datetime
+
+    updated_at: datetime
 
 
 class ExtractedDocumentText(DomainModel):

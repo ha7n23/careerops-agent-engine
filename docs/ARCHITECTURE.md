@@ -207,6 +207,8 @@ Before running evidence discovery for a requirement set, the runner performs one
 
 The approved Evidence Registry is also exposed through read-only, authenticated API endpoints for downstream gateways and frontends. Listing is bounded and user scoped; individual retrieval uses the same opaque `404` response for unknown and cross-user identifiers. Pending or rejected evidence is never exposed through this interface.
 
+The frontend recovery boundary also exposes bounded, newest-first histories for uploaded CV documents and evidence-review runs. Dedicated summary projections return only presentation-safe metadata, lifecycle status, timestamps, and proposal/approval counts. Queries remain user scoped and do not load document contents, private storage locations, hashes, or complete review payloads.
+
 ## 6. Requirement extraction and deterministic fit scoring
 
 Job descriptions are treated as **untrusted document content**. The current requirement prompt explicitly instructs the model not to follow instructions embedded inside the posting and to extract only supported requirements.
@@ -449,7 +451,7 @@ Cloud deployment is deliberately deferred. The project proves deployment readine
 
 ## 15. Testing strategy
 
-The current verified baseline is **450 passed, 9 skipped**.
+The current verified baseline is **465 passed, 9 skipped**.
 
 The suite covers:
 
@@ -465,7 +467,7 @@ The suite covers:
 
 The nine default skips are explicit live LLM or live document-runtime tests gated behind environment flags. This keeps ordinary CI deterministic while retaining opt-in real-provider/runtime proofs.
 
-Strict mypy currently checks **152 source files**; Ruff covers `src` and `tests`.
+Strict mypy currently checks **153 source files**; Ruff covers `src` and `tests`.
 
 ## 16. Trade-offs and extension points
 

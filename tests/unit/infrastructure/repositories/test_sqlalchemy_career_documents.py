@@ -139,3 +139,47 @@ def test_document_identity_metadata_cannot_change(
             user_id="USER-001",
             document=build_document(filename="different.pdf"),
         )
+
+
+def test_document_summaries_are_bounded_newest_first_and_user_scoped(
+    repository: SqlAlchemyCareerDocumentRepository,
+) -> None:
+    """Document history should be bounded and remain inside its user scope."""
+
+    first_document = build_document()
+
+    second_document = build_document().model_copy(
+        update={
+            "document_id": "DOC-002",
+            "original_filename": "newer-cv.pdf",
+            "storage_key": "documents/usr-test/DOC-002.pdf",
+        }
+    )
+
+    repository.save(
+        user_id="USER-001",
+        document=first_document,
+    )
+    repository.save(
+        user_id="USER-001",
+        document=second_document,
+    )
+
+    summaries = repository.list_summaries(
+        user_id="USER-001",
+        limit=1,
+    )
+
+    assert len(summaries) == 1
+    assert summaries[0].document_id == "DOC-002"
+    assert summaries[0].original_filename == "newer-cv.pdf"
+    assert summaries[0].uploaded_at is not None
+    assert summaries[0].updated_at is not None
+
+    assert (
+        repository.list_summaries(
+            user_id="USER-OTHER",
+            limit=10,
+        )
+        == []
+    )

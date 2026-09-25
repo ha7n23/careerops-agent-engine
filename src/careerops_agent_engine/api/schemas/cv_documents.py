@@ -1,6 +1,8 @@
 """API schemas for career-document ingestion."""
 
-from pydantic import BaseModel, ConfigDict
+from datetime import datetime
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from careerops_agent_engine.domain.enums import (
     CareerDocumentFormat,
@@ -9,6 +11,7 @@ from careerops_agent_engine.domain.enums import (
 )
 from careerops_agent_engine.domain.models.document import (
     CareerDocument,
+    CareerDocumentSummary,
 )
 from careerops_agent_engine.domain.models.evidence import (
     CareerEvidenceOverlapFinding,
@@ -16,6 +19,7 @@ from careerops_agent_engine.domain.models.evidence import (
 )
 from careerops_agent_engine.domain.models.evidence_audit import (
     CVEvidenceReviewRunSnapshot,
+    CVEvidenceReviewRunSummary,
 )
 from careerops_agent_engine.domain.models.evidence_review import (
     EvidenceReviewResult,
@@ -83,4 +87,125 @@ class CVEvidenceReviewRunResponse(BaseModel):
             overlap_findings=list(snapshot.overlap_findings),
             document_warnings=list(snapshot.document_warnings),
             review_result=snapshot.review_result,
+        )
+
+
+class CareerDocumentSummaryResponse(BaseModel):
+    """Frontend-safe summary of one uploaded CV document."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    document_id: str
+    original_filename: str
+    document_format: CareerDocumentFormat
+    size_bytes: int
+    status: CareerDocumentStatus
+    uploaded_at: datetime
+    updated_at: datetime
+
+    @classmethod
+    def from_domain(
+        cls,
+        summary: CareerDocumentSummary,
+    ) -> "CareerDocumentSummaryResponse":
+        """Build a public document-history item."""
+
+        return cls(
+            document_id=summary.document_id,
+            original_filename=summary.original_filename,
+            document_format=summary.document_format,
+            size_bytes=summary.size_bytes,
+            status=summary.status,
+            uploaded_at=summary.uploaded_at,
+            updated_at=summary.updated_at,
+        )
+
+
+class CareerDocumentHistoryResponse(BaseModel):
+    """Bounded history of uploaded CV documents."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[CareerDocumentSummaryResponse]
+    count: int = Field(ge=0)
+    limit: int = Field(ge=1, le=100)
+
+    @classmethod
+    def from_domain(
+        cls,
+        summaries: list[CareerDocumentSummary],
+        *,
+        limit: int,
+    ) -> "CareerDocumentHistoryResponse":
+        """Build a bounded public document-history response."""
+
+        items = [
+            CareerDocumentSummaryResponse.from_domain(summary) for summary in summaries
+        ]
+
+        return cls(
+            items=items,
+            count=len(items),
+            limit=limit,
+        )
+
+
+class CVEvidenceReviewRunSummaryResponse(BaseModel):
+    """Frontend-safe summary of one evidence-review run."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    review_run_id: str
+    document_id: str
+    status: CVEvidenceReviewRunStatus
+    proposal_count: int
+    approved_evidence_count: int
+    created_at: datetime
+    updated_at: datetime
+
+    @classmethod
+    def from_domain(
+        cls,
+        summary: CVEvidenceReviewRunSummary,
+    ) -> "CVEvidenceReviewRunSummaryResponse":
+        """Build a public review-history item."""
+
+        return cls(
+            review_run_id=summary.review_run_id,
+            document_id=summary.document_id,
+            status=summary.status,
+            proposal_count=summary.proposal_count,
+            approved_evidence_count=summary.approved_evidence_count,
+            created_at=summary.created_at,
+            updated_at=summary.updated_at,
+        )
+
+
+class CVEvidenceReviewHistoryResponse(BaseModel):
+    """Bounded history of CV evidence-review runs."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[CVEvidenceReviewRunSummaryResponse]
+    count: int = Field(ge=0)
+    limit: int = Field(ge=1, le=100)
+
+    @classmethod
+    def from_domain(
+        cls,
+        summaries: list[CVEvidenceReviewRunSummary],
+        *,
+        limit: int,
+    ) -> "CVEvidenceReviewHistoryResponse":
+        """Build a bounded public review-history response."""
+
+        items = [
+            CVEvidenceReviewRunSummaryResponse.from_domain(summary)
+            for summary in summaries
+        ]
+
+        return cls(
+            items=items,
+            count=len(items),
+            limit=limit,
         )

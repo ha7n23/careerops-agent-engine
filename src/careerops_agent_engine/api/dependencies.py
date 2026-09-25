@@ -11,12 +11,6 @@ from careerops_agent_engine.api.security import (
 from careerops_agent_engine.application.ports.artifact_storage import (
     ArtifactStorage,
 )
-from careerops_agent_engine.application.ports.career_document_repository import (
-    CareerDocumentRepository,
-)
-from careerops_agent_engine.application.ports.cv_evidence_audit_repository import (
-    CVEvidenceAuditRepository,
-)
 from careerops_agent_engine.application.ports.cv_version_repository import (
     CVVersionRepository,
 )
@@ -52,6 +46,9 @@ from careerops_agent_engine.application.services.cv_document_upload import (
 )
 from careerops_agent_engine.application.services.cv_evidence_duplicates import (
     CVEvidenceDuplicateDetector,
+)
+from careerops_agent_engine.application.services.cv_evidence_history import (
+    CVEvidenceHistoryService,
 )
 from careerops_agent_engine.application.services.cv_evidence_proposals import (
     CVEvidenceProposalService,
@@ -205,17 +202,27 @@ def get_cv_document_upload_service() -> CVDocumentUploadService:
 
 
 @lru_cache
-def get_career_document_repository() -> CareerDocumentRepository:
+def get_career_document_repository() -> SqlAlchemyCareerDocumentRepository:
     """Create the PostgreSQL career-document repository."""
 
     return SqlAlchemyCareerDocumentRepository(get_database_session_factory())
 
 
 @lru_cache
-def get_cv_evidence_audit_repository() -> CVEvidenceAuditRepository:
+def get_cv_evidence_audit_repository() -> SqlAlchemyCVEvidenceAuditRepository:
     """Create the PostgreSQL CV evidence-review audit repository."""
 
     return SqlAlchemyCVEvidenceAuditRepository(get_database_session_factory())
+
+
+@lru_cache
+def get_cv_evidence_history_service() -> CVEvidenceHistoryService:
+    """Create the CV upload and evidence-review history service."""
+
+    return CVEvidenceHistoryService(
+        document_repository=get_career_document_repository(),
+        review_repository=get_cv_evidence_audit_repository(),
+    )
 
 
 @lru_cache

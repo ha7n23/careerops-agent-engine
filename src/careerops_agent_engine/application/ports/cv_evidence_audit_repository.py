@@ -5,6 +5,7 @@ from typing import Protocol
 from careerops_agent_engine.domain.models.evidence_audit import (
     CVEvidenceReviewAuditEntry,
     CVEvidenceReviewRunSnapshot,
+    CVEvidenceReviewRunSummary,
 )
 
 
@@ -56,5 +57,19 @@ class CVEvidenceAuditRepository(Protocol):
         review_run_id: str,
     ) -> list[CVEvidenceReviewAuditEntry]:
         """Return ordered review history for one user-owned run."""
+
+        ...
+
+
+class CVEvidenceReviewHistoryRepository(Protocol):
+    """Query bounded user-owned evidence-review history."""
+
+    def list_run_summaries(
+        self,
+        *,
+        user_id: str,
+        limit: int,
+    ) -> list[CVEvidenceReviewRunSummary]:
+        """Return the user's newest evidence-review runs first."""
 
         ...

@@ -1,8 +1,10 @@
 """SQLAlchemy repository for persistent career-document metadata."""
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from careerops_agent_engine.application.ports.career_document_repository import (
+    CareerDocumentHistoryRepository,
     CareerDocumentRepository,
 )
 from careerops_agent_engine.domain.enums import (
@@ -11,13 +13,17 @@ from careerops_agent_engine.domain.enums import (
 )
 from careerops_agent_engine.domain.models.document import (
     CareerDocument,
+    CareerDocumentSummary,
 )
 from careerops_agent_engine.infrastructure.database.models.cv_evidence import (
     CareerDocumentRecord,
 )
 
 
-class SqlAlchemyCareerDocumentRepository(CareerDocumentRepository):
+class SqlAlchemyCareerDocumentRepository(
+    CareerDocumentRepository,
+    CareerDocumentHistoryRepository,
+):
     """Persist user-owned CV document metadata."""
 
     def __init__(
@@ -83,6 +89,29 @@ class SqlAlchemyCareerDocumentRepository(CareerDocumentRepository):
 
         return document_record_to_domain(record)
 
+    def list_summaries(
+        self,
+        *,
+        user_id: str,
+        limit: int,
+    ) -> list[CareerDocumentSummary]:
+        """Return bounded document history inside the user boundary."""
+
+        statement = (
+            select(CareerDocumentRecord)
+            .where(CareerDocumentRecord.user_id == user_id)
+            .order_by(
+                CareerDocumentRecord.created_at.desc(),
+                CareerDocumentRecord.document_id.desc(),
+            )
+            .limit(limit)
+        )
+
+        with self._session_factory() as session:
+            records = session.execute(statement).scalars().all()
+
+        return [document_record_to_summary(record) for record in records]
+
 
 def document_to_record(
     *,
@@ -118,6 +147,22 @@ def document_record_to_domain(
         sha256_hex=record.sha256_hex,
         storage_key=record.storage_key,
         status=CareerDocumentStatus(record.status),
+    )
+
+
+def document_record_to_summary(
+    record: CareerDocumentRecord,
+) -> CareerDocumentSummary:
+    """Convert persistent metadata to a lightweight history summary."""
+
+    return CareerDocumentSummary(
+        document_id=record.document_id,
+        original_filename=record.original_filename,
+        document_format=CareerDocumentFormat(record.document_format),
+        size_bytes=record.size_bytes,
+        status=CareerDocumentStatus(record.status),
+        uploaded_at=record.created_at,
+        updated_at=record.updated_at,
     )
 
 
