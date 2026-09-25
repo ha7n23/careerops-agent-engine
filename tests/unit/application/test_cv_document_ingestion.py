@@ -1,5 +1,12 @@
 """Tests for persistent CV upload orchestration."""
 
+from hashlib import sha256
+
+import pytest
+
+from careerops_agent_engine.application.exceptions import (
+    DocumentUploadValidationError,
+)
 from careerops_agent_engine.application.services.cv_document_ingestion import (
     CVDocumentIngestionService,
 )
@@ -8,6 +15,7 @@ from careerops_agent_engine.application.services.cv_document_upload import (
 )
 from careerops_agent_engine.domain.enums import (
     CareerDocumentFormat,
+    CareerDocumentStatus,
 )
 from careerops_agent_engine.domain.models.document import CareerDocument
 
@@ -155,3 +163,178 @@ def test_metadata_failure_cleans_up_stored_bytes() -> None:
 
     assert storage.saved == {}
     assert len(storage.deleted) == 1
+
+
+def test_ingest_text_persists_normalised_utf8_source() -> None:
+    """Pasted evidence should use the trusted text-document pipeline."""
+
+    storage = FakeStorage()
+    repository = FakeDocumentRepository()
+
+    service = CVDocumentIngestionService(
+        upload_service=CVDocumentUploadService(
+            storage=storage,
+            max_upload_bytes=1024,
+        ),
+        repository=repository,
+        storage=storage,
+        max_text_characters=100,
+    )
+
+    document = service.ingest_text(
+        user_id="USER-001",
+        title="  AWS deployment notes  ",
+        content=(
+            "  Deployed a FastAPI application to AWS.\r\n"
+            "Containerised the service using Docker.  "
+        ),
+    )
+
+    expected_data = (
+        b"Deployed a FastAPI application to AWS.\n"
+        b"Containerised the service using Docker."
+    )
+
+    assert document.original_filename == "AWS deployment notes.txt"
+    assert document.document_format is CareerDocumentFormat.TEXT
+    assert document.media_type == "text/plain; charset=utf-8"
+    assert document.status is CareerDocumentStatus.UPLOADED
+    assert document.size_bytes == len(expected_data)
+    assert document.sha256_hex == sha256(expected_data).hexdigest()
+
+    assert storage.saved[document.storage_key] == expected_data
+    assert repository.saved == [("USER-001", document)]
+
+
+def test_ingest_text_rejects_blank_content_before_storage() -> None:
+    """Whitespace-only textarea content must not create a document."""
+
+    storage = FakeStorage()
+    repository = FakeDocumentRepository()
+
+    service = CVDocumentIngestionService(
+        upload_service=CVDocumentUploadService(
+            storage=storage,
+            max_upload_bytes=1024,
+        ),
+        repository=repository,
+        storage=storage,
+    )
+
+    with pytest.raises(
+        DocumentUploadValidationError,
+        match="cannot be empty",
+    ):
+        service.ingest_text(
+            user_id="USER-001",
+            title="Notes",
+            content=" \r\n\t ",
+        )
+
+    assert storage.saved == {}
+    assert repository.saved == []
+
+
+def test_ingest_text_rejects_content_above_character_limit() -> None:
+    """Oversized pasted evidence must stop before storage."""
+
+    storage = FakeStorage()
+    repository = FakeDocumentRepository()
+
+    service = CVDocumentIngestionService(
+        upload_service=CVDocumentUploadService(
+            storage=storage,
+            max_upload_bytes=1024,
+        ),
+        repository=repository,
+        storage=storage,
+        max_text_characters=10,
+    )
+
+    with pytest.raises(
+        DocumentUploadValidationError,
+        match="maximum allowed length",
+    ):
+        service.ingest_text(
+            user_id="USER-001",
+            title="Notes",
+            content="12345678901",
+        )
+
+    assert storage.saved == {}
+    assert repository.saved == []
+
+
+def test_ingest_text_rejects_blank_title() -> None:
+    """Every pasted source requires a frontend-visible title."""
+
+    storage = FakeStorage()
+
+    service = CVDocumentIngestionService(
+        upload_service=CVDocumentUploadService(
+            storage=storage,
+            max_upload_bytes=1024,
+        ),
+        repository=FakeDocumentRepository(),
+        storage=storage,
+    )
+
+    with pytest.raises(
+        DocumentUploadValidationError,
+        match="requires a title",
+    ):
+        service.ingest_text(
+            user_id="USER-001",
+            title=" \t ",
+            content="Built an API using FastAPI.",
+        )
+
+    assert storage.saved == {}
+
+
+def test_text_metadata_failure_removes_stored_bytes() -> None:
+    """A database failure must not leave orphaned pasted-text bytes."""
+
+    storage = FakeStorage()
+
+    service = CVDocumentIngestionService(
+        upload_service=CVDocumentUploadService(
+            storage=storage,
+            max_upload_bytes=1024,
+        ),
+        repository=FakeDocumentRepository(fail_save=True),
+        storage=storage,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Database unavailable",
+    ):
+        service.ingest_text(
+            user_id="USER-001",
+            title="Python evidence",
+            content="Built Python APIs using FastAPI.",
+        )
+
+    assert storage.saved == {}
+    assert len(storage.deleted) == 1
+
+
+def test_ingestion_requires_positive_text_limit() -> None:
+    """The pasted-text safety boundary cannot be disabled."""
+
+    storage = FakeStorage()
+
+    with pytest.raises(
+        ValueError,
+        match="text character count must be positive",
+    ):
+        CVDocumentIngestionService(
+            upload_service=CVDocumentUploadService(
+                storage=storage,
+                max_upload_bytes=1024,
+            ),
+            repository=FakeDocumentRepository(),
+            storage=storage,
+            max_text_characters=0,
+        )

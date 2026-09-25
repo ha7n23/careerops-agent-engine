@@ -191,7 +191,9 @@ A CV upload moves through:
 
 Only approved evidence is exposed to downstream job analysis.
 
-`CareerDocument` acts as the durable trusted-source envelope for all three formats. A text source is UTF-8 encoded, hashed, stored under the same private user namespace, persisted with `CareerDocumentFormat.TEXT`, and passed through the same extraction, section parsing, proposal, duplicate-detection, review, and audit boundaries. Prepared sources carry trusted provenance: PDF/DOCX records produce `uploaded_cv` references, while text records produce `manual_entry` references. The existing multipart upload endpoint intentionally remains PDF/DOCX-only; a dedicated validated textarea endpoint is added separately so arbitrary file uploads cannot bypass format validation.
+`CareerDocument` acts as the durable trusted-source envelope for all three formats. A text source is UTF-8 encoded, hashed, stored under the same private user namespace, persisted with `CareerDocumentFormat.TEXT`, and passed through the same extraction, section parsing, proposal, duplicate-detection, review, and audit boundaries. Prepared sources carry trusted provenance: PDF/DOCX records produce `uploaded_cv` references, while text records produce `manual_entry` references. Multipart upload intentionally remains PDF/DOCX-only. The dedicated `POST /api/v1/cv-documents/text` JSON endpoint accepts a frontend-visible title and bounded textarea content, returning the same safe document metadata contract as file upload.
+
+Text submission stores the source but does not bypass review or immediately trust its claims. The returned `document_id` enters the existing evidence-review endpoint, where model proposals remain pending until deterministic validation, duplicate detection, and explicit human approval complete.
 
 Master-CV processing is deliberately bounded before evidence extraction. The default contract accepts uploads up to 5 MiB, native PDFs up to 15 pages, extracted text up to 30,000 characters, and parsed documents up to 20 sections. DOCX inspection additionally permits at most 500 archive entries and 10 MiB of expanded package content. Structured evidence extraction exposes and enforces a maximum of 30 candidates. Limits fail explicitly without truncation; preparation failures make no evidence-model call, persist no review run, and leave the document retryable.
 
@@ -329,7 +331,7 @@ The business schema is managed with Alembic and SQLAlchemy.
 
 | Record | Purpose |
 | --- | --- |
-| `career_documents` | User-owned uploaded CV metadata and integrity information |
+| `career_documents` | User-owned PDF, DOCX, and text source metadata and integrity information |
 | `cv_evidence_review_runs` | Latest evidence-review snapshot |
 | `cv_evidence_review_history` | Append-only evidence-review decisions/results |
 | `career_evidence` | Human-approved trusted career evidence |
@@ -459,7 +461,7 @@ Cloud deployment is deliberately deferred. The project proves deployment readine
 
 ## 15. Testing strategy
 
-The current verified baseline is **489 passed, 9 skipped**.
+The current verified baseline is **500 passed, 9 skipped**.
 
 The suite covers:
 

@@ -9,12 +9,12 @@ CareerOps Agent Engine is a portfolio-grade AI engineering project built around 
 ## 30-second summary
 
 - **CV evidence pipeline:** securely ingest PDF/DOCX CVs, extract structured evidence proposals, detect overlaps, and require explicit human approval before evidence enters the trusted registry.
-- **Unified evidence-source foundation:** PDF, DOCX, and trusted UTF-8 text share private storage, hashing, deterministic extraction, structured parsing, provenance, review, and audit contracts. The multipart upload endpoint remains PDF/DOCX-only; public textarea submission is introduced separately.
+- **Unified evidence-source foundation:** PDF, DOCX, and trusted UTF-8 text share private storage, hashing, deterministic extraction, structured parsing, provenance, review, and audit contracts. Multipart upload remains PDF/DOCX-only, while `POST /api/v1/cv-documents/text` provides a dedicated JSON contract for frontend textarea submission.
 - **Bounded master-CV processing:** uploads are read with a hard byte boundary, PDF pages, extracted characters, parsed sections, DOCX expansion, and model-produced evidence candidates are capped before expensive or persistent workflow work.
 - **Job-analysis graph:** extract requirements, use a bounded tool-calling agent to discover approved evidence, calculate a deterministic fit score, generate grounded CV proposals, verify factual claims, and pause for human review.
 - **Verified document output:** apply accepted changes to a structured CV, create an immutable version, render an ATS-friendly DOCX, convert it to PDF with LibreOffice, and deterministically verify both artifacts before download.
 - **Production-style engineering:** PostgreSQL persistence and LangGraph checkpoints, LangSmith tracing/evaluation with privacy masking, FastAPI security boundaries, Dockerised runtime, Alembic migrations, and GitHub Actions container integration.
-- **Current quality baseline:** **489 passing tests**, **9 opt-in live integration tests skipped by default**, Ruff clean, and strict mypy checks across **154 source files**.
+- **Current quality baseline:** **500 passing tests**, **9 opt-in live integration tests skipped by default**, Ruff clean, and strict mypy checks across **154 source files**.
 
 > For the deeper design, trust boundaries, workflow states, persistence model, and trade-offs, see [Architecture](docs/ARCHITECTURE.md).
 
@@ -97,6 +97,7 @@ System endpoints remain public for infrastructure health checks; business endpoi
 | `GET` | `/ready` | PostgreSQL/schema readiness |
 | `GET` | `/api/v1/cv-documents` | List the authenticated user’s uploaded CV history |
 | `POST` | `/api/v1/cv-documents` | Upload a validated PDF/DOCX CV |
+| `POST` | `/api/v1/cv-documents/text` | Store a validated pasted-text evidence source |
 | `POST` | `/api/v1/cv-documents/{document_id}/evidence-review` | Start or recover evidence review |
 | `GET` | `/api/v1/cv-evidence-reviews` | List the authenticated user’s evidence-review history |
 | `GET` | `/api/v1/cv-evidence-reviews/{review_run_id}` | Recover a persisted evidence-review run |
@@ -109,6 +110,8 @@ System endpoints remain public for infrastructure health checks; business endpoi
 | `GET` | `/api/v1/cv-versions/{cv_version_id}` | Read safe CV-version metadata |
 | `GET` | `/api/v1/cv-versions/{cv_version_id}/artifacts/{artifact_format}` | Download verified DOCX/PDF bytes |
 
+
+Both file upload and pasted-text submission return safe document metadata containing the `document_id`. The frontend uses that identifier with `POST /api/v1/cv-documents/{document_id}/evidence-review`; text-derived proposals retain `manual_entry` provenance and pass through the same duplicate detection and human-approval workflow as uploaded CV evidence.
 
 CV document and evidence-review history listings are user scoped, newest first, and bounded to 100 records. They expose lightweight metadata and counters without returning private storage keys, document hashes, owning user identifiers, or complete review payloads.
 
@@ -250,4 +253,4 @@ See **[docs/architecture.md](docs/ARCHITECTURE.md)** for the graph topology, evi
 - Added regression coverage for bounded evidence-discovery failure handling.
 - Successfully validated authenticated service-to-service job analysis from the separate CareerOps Automation & MCP Hub over the public HTTP API.
 
-Current quality baseline: **489 passed, 9 skipped**, Ruff clean, strict mypy clean across **154 source files**.
+Current quality baseline: **500 passed, 9 skipped**, Ruff clean, strict mypy clean across **154 source files**.

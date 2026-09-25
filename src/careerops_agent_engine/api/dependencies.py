@@ -229,10 +229,13 @@ def get_cv_evidence_history_service() -> CVEvidenceHistoryService:
 def get_cv_document_ingestion_service() -> CVDocumentIngestionService:
     """Create the persistent CV ingestion service."""
 
+    settings = get_settings()
+
     return CVDocumentIngestionService(
         upload_service=get_cv_document_upload_service(),
         repository=get_career_document_repository(),
         storage=get_document_storage(),
+        max_text_characters=(settings.document_extraction_max_characters),
     )
 
 
