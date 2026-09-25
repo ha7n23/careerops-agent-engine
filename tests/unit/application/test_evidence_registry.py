@@ -3,6 +3,7 @@
 import pytest
 
 from careerops_agent_engine.application.exceptions import (
+    CareerEvidenceEditValidationError,
     CareerEvidenceUnavailableError,
 )
 from careerops_agent_engine.application.services.evidence_registry import (
@@ -10,11 +11,13 @@ from careerops_agent_engine.application.services.evidence_registry import (
 )
 from careerops_agent_engine.domain.enums import (
     EvidenceCategory,
+    EvidenceLifecycleStatus,
     EvidenceSourceType,
     VerificationStatus,
 )
 from careerops_agent_engine.domain.models.evidence import (
     CareerEvidence,
+    CareerEvidenceEdit,
     SourceReference,
 )
 from careerops_agent_engine.infrastructure.repositories.in_memory_evidence import (
@@ -122,4 +125,75 @@ def test_get_hides_unknown_record() -> None:
         build_service().get_approved(
             user_id="USER-001",
             evidence_id="EVD-MISSING",
+        )
+
+
+def test_archive_is_recoverable_and_excluded_from_active_listing() -> None:
+    """Archiving must remove evidence from downstream active reads."""
+
+    service = build_service()
+
+    archived = service.archive_approved(
+        user_id="USER-001",
+        evidence_id="EVD-001",
+    )
+
+    assert archived.lifecycle_status is EvidenceLifecycleStatus.ARCHIVED
+    assert [item.evidence_id for item in service.list_approved(user_id="USER-001")] == [
+        "EVD-002"
+    ]
+    assert (
+        service.get_approved(
+            user_id="USER-001",
+            evidence_id="EVD-001",
+        ).lifecycle_status
+        is EvidenceLifecycleStatus.ARCHIVED
+    )
+
+    restored = service.restore_approved(
+        user_id="USER-001",
+        evidence_id="EVD-001",
+    )
+
+    assert restored.lifecycle_status is EvidenceLifecycleStatus.ACTIVE
+
+
+def test_edit_preserves_trusted_fields() -> None:
+    """Registry edits must not replace provenance, ownership or approval."""
+
+    service = build_service()
+    original = service.get_approved(
+        user_id="USER-001",
+        evidence_id="EVD-001",
+    )
+
+    updated = service.edit_approved(
+        user_id="USER-001",
+        evidence_id="EVD-001",
+        edit=CareerEvidenceEdit(
+            title="CareerOps Platform",
+            capabilities=["AI application engineering"],
+        ),
+    )
+
+    assert updated.title == "CareerOps Platform"
+    assert updated.capabilities == ["AI application engineering"]
+    assert updated.source_references == original.source_references
+    assert updated.verification_status is VerificationStatus.APPROVED
+    assert updated.lifecycle_status is EvidenceLifecycleStatus.ACTIVE
+
+
+def test_edit_rejects_new_ungrounded_claim() -> None:
+    """An edit cannot turn unsupported wording into approved evidence."""
+
+    with pytest.raises(
+        CareerEvidenceEditValidationError,
+        match="grounded in trusted source evidence",
+    ):
+        build_service().edit_approved(
+            user_id="USER-001",
+            evidence_id="EVD-001",
+            edit=CareerEvidenceEdit(
+                approved_claims=["Deployed CareerOps to Kubernetes."],
+            ),
         )

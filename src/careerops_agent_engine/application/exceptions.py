@@ -9,6 +9,10 @@ class CareerEvidenceUnavailableError(ValueError):
     """An approved evidence record cannot be accessed by the user."""
 
 
+class CareerEvidenceEditValidationError(ValueError):
+    """An approved evidence edit failed deterministic validation."""
+
+
 class CVProposalValidationError(ValueError):
     """Generated CV proposal failed deterministic validation."""
 

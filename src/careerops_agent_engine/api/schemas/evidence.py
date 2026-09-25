@@ -1,15 +1,69 @@
 """Public API schemas for the approved Evidence Registry."""
 
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Annotated, Self
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from careerops_agent_engine.domain.enums import (
     EvidenceCategory,
+    EvidenceLifecycleStatus,
     VerificationStatus,
 )
 from careerops_agent_engine.domain.models.evidence import (
     CareerEvidence,
+    CareerEvidenceEdit,
     SourceReference,
 )
+
+EvidenceEditValue = Annotated[str, Field(min_length=1, max_length=1_000)]
+
+
+class CareerEvidenceEditRequest(BaseModel):
+    """Strict frontend request for editable evidence fields only."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+    )
+
+    category: EvidenceCategory | None = None
+    title: str | None = Field(default=None, min_length=1, max_length=250)
+    technologies: list[EvidenceEditValue] | None = Field(
+        default=None,
+        max_length=50,
+    )
+    capabilities: list[EvidenceEditValue] | None = Field(
+        default=None,
+        max_length=50,
+    )
+    approved_claims: list[EvidenceEditValue] | None = Field(
+        default=None,
+        min_length=1,
+        max_length=50,
+    )
+
+    @model_validator(mode="after")
+    def require_actual_edit(self) -> Self:
+        """Require at least one concrete replacement value."""
+
+        if all(
+            value is None
+            for value in (
+                self.category,
+                self.title,
+                self.technologies,
+                self.capabilities,
+                self.approved_claims,
+            )
+        ):
+            raise ValueError("An evidence edit must change at least one field.")
+
+        return self
+
+    def to_domain(self) -> CareerEvidenceEdit:
+        """Convert the public request to a strict domain edit."""
+
+        return CareerEvidenceEdit.model_validate(self.model_dump(exclude_none=True))
 
 
 class CareerEvidenceResponse(BaseModel):
@@ -21,6 +75,7 @@ class CareerEvidenceResponse(BaseModel):
     category: EvidenceCategory
     title: str
     verification_status: VerificationStatus
+    lifecycle_status: EvidenceLifecycleStatus
 
     technologies: list[str]
     capabilities: list[str]
@@ -39,6 +94,7 @@ class CareerEvidenceResponse(BaseModel):
             category=evidence.category,
             title=evidence.title,
             verification_status=evidence.verification_status,
+            lifecycle_status=evidence.lifecycle_status,
             technologies=list(evidence.technologies),
             capabilities=list(evidence.capabilities),
             approved_claims=list(evidence.approved_claims),
