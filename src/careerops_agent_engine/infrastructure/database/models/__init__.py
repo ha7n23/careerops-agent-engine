@@ -10,6 +10,7 @@ from careerops_agent_engine.infrastructure.database.models.cv_version import (
     CVVersionRecord,
 )
 from careerops_agent_engine.infrastructure.database.models.evidence import (
+    CareerEvidenceHistoryRecord,
     CareerEvidenceRecord,
 )
 from careerops_agent_engine.infrastructure.database.models.job_analysis import (
@@ -24,6 +25,7 @@ __all__ = [
     "CVArtifactRecord",
     "CVVersionRecord",
     "CareerDocumentRecord",
+    "CareerEvidenceHistoryRecord",
     "CareerEvidenceRecord",
     "JobAnalysisRunRecord",
 ]

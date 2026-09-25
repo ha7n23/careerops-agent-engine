@@ -28,6 +28,21 @@ class VerificationStatus(StrEnum):
     SUPERSEDED = "superseded"
 
 
+class EvidenceLifecycleStatus(StrEnum):
+    """User-controlled availability of approved career evidence."""
+
+    ACTIVE = "active"
+    ARCHIVED = "archived"
+
+
+class EvidenceMutationAction(StrEnum):
+    """Auditable mutations supported by the Evidence Registry."""
+
+    EDIT = "edit"
+    ARCHIVE = "archive"
+    RESTORE = "restore"
+
+
 class EvidenceCategory(StrEnum):
     """High-level category of a career evidence record."""
 

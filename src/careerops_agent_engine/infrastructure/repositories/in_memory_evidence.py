@@ -3,8 +3,14 @@
 import re
 from collections.abc import Mapping, Sequence
 
-from careerops_agent_engine.domain.enums import VerificationStatus
-from careerops_agent_engine.domain.models.evidence import CareerEvidence
+from careerops_agent_engine.domain.enums import (
+    EvidenceLifecycleStatus,
+    VerificationStatus,
+)
+from careerops_agent_engine.domain.models.evidence import (
+    CareerEvidence,
+    CareerEvidenceEdit,
+)
 
 TOKEN_PATTERN = re.compile(r"[a-z0-9][a-z0-9+#.-]*")
 
@@ -117,6 +123,100 @@ class InMemoryEvidenceRepository:
 
         return self._approved_records(user_id)[:limit]
 
+    def get_approved_for_management(
+        self,
+        *,
+        user_id: str,
+        evidence_id: str,
+    ) -> CareerEvidence | None:
+        """Return active or archived approved evidence for its owner."""
+
+        return next(
+            (
+                evidence
+                for evidence in self._records_by_user.get(user_id, [])
+                if evidence.evidence_id == evidence_id
+                and evidence.verification_status is VerificationStatus.APPROVED
+            ),
+            None,
+        )
+
+    def edit_approved(
+        self,
+        *,
+        user_id: str,
+        evidence_id: str,
+        edit: CareerEvidenceEdit,
+    ) -> CareerEvidence | None:
+        """Apply an edit to one approved record."""
+
+        evidence = self.get_approved_for_management(
+            user_id=user_id,
+            evidence_id=evidence_id,
+        )
+
+        if evidence is None:
+            return None
+
+        updated = evidence.model_copy(
+            update=edit.model_dump(exclude_none=True),
+        )
+
+        self._replace_record(
+            user_id=user_id,
+            evidence=updated,
+        )
+
+        return updated
+
+    def set_lifecycle_status(
+        self,
+        *,
+        user_id: str,
+        evidence_id: str,
+        lifecycle_status: EvidenceLifecycleStatus,
+    ) -> CareerEvidence | None:
+        """Idempotently change one approved record's lifecycle."""
+
+        evidence = self.get_approved_for_management(
+            user_id=user_id,
+            evidence_id=evidence_id,
+        )
+
+        if evidence is None:
+            return None
+
+        if evidence.lifecycle_status is lifecycle_status:
+            return evidence
+
+        updated = evidence.model_copy(
+            update={"lifecycle_status": lifecycle_status},
+        )
+
+        self._replace_record(
+            user_id=user_id,
+            evidence=updated,
+        )
+
+        return updated
+
+    def _replace_record(
+        self,
+        *,
+        user_id: str,
+        evidence: CareerEvidence,
+    ) -> None:
+        """Replace one existing in-memory record."""
+
+        records = self._records_by_user[user_id]
+
+        for index, existing in enumerate(records):
+            if existing.evidence_id == evidence.evidence_id:
+                records[index] = evidence
+                return
+
+        raise ValueError("Evidence record is unavailable.")
+
     def _approved_records(
         self,
         user_id: str,
@@ -127,4 +227,5 @@ class InMemoryEvidenceRepository:
             evidence
             for evidence in self._records_by_user.get(user_id, [])
             if (evidence.verification_status is VerificationStatus.APPROVED)
+            and evidence.lifecycle_status is EvidenceLifecycleStatus.ACTIVE
         ]

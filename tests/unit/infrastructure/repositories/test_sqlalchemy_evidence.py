@@ -8,10 +8,13 @@ from sqlalchemy.engine import Engine
 
 from careerops_agent_engine.domain.enums import (
     EvidenceCategory,
+    EvidenceLifecycleStatus,
     VerificationStatus,
 )
+from careerops_agent_engine.domain.models.evidence import CareerEvidenceEdit
 from careerops_agent_engine.infrastructure.database.base import Base
 from careerops_agent_engine.infrastructure.database.models.evidence import (
+    CareerEvidenceHistoryRecord,
     CareerEvidenceRecord,
 )
 from careerops_agent_engine.infrastructure.database.session import (
@@ -152,3 +155,84 @@ def test_list_returns_only_approved_user_evidence(
     )
 
     assert [result.evidence_id for result in results] == ["EVD-DOCKER"]
+
+
+def test_archive_restore_and_edit_are_audited_and_idempotent(
+    repository: SqlAlchemyEvidenceRepository,
+) -> None:
+    """Each meaningful mutation gets one audit entry; retries do not."""
+
+    archived = repository.set_lifecycle_status(
+        user_id="USER-001",
+        evidence_id="EVD-DOCKER",
+        lifecycle_status=EvidenceLifecycleStatus.ARCHIVED,
+    )
+    retry = repository.set_lifecycle_status(
+        user_id="USER-001",
+        evidence_id="EVD-DOCKER",
+        lifecycle_status=EvidenceLifecycleStatus.ARCHIVED,
+    )
+
+    assert archived is not None
+    assert retry == archived
+    assert repository.list_approved(user_id="USER-001") == []
+    assert (
+        repository.get_approved(
+            user_id="USER-001",
+            evidence_id="EVD-DOCKER",
+        )
+        is None
+    )
+    assert (
+        repository.get_approved_for_management(
+            user_id="USER-001",
+            evidence_id="EVD-DOCKER",
+        )
+        == archived
+    )
+
+    restored = repository.set_lifecycle_status(
+        user_id="USER-001",
+        evidence_id="EVD-DOCKER",
+        lifecycle_status=EvidenceLifecycleStatus.ACTIVE,
+    )
+    edited = repository.edit_approved(
+        user_id="USER-001",
+        evidence_id="EVD-DOCKER",
+        edit=CareerEvidenceEdit(title="Containerised CareerOps Service"),
+    )
+
+    assert restored is not None
+    assert edited is not None
+    assert edited.title == "Containerised CareerOps Service"
+
+    with repository._session_factory() as session:
+        history = session.query(CareerEvidenceHistoryRecord).all()
+        actions = [record.action for record in history]
+
+    assert len(actions) == 3
+    assert set(actions) == {"archive", "restore", "edit"}
+
+
+def test_mutations_keep_unknown_and_cross_user_ids_opaque(
+    repository: SqlAlchemyEvidenceRepository,
+) -> None:
+    """Mutation methods must enforce the same ownership boundary as reads."""
+
+    for evidence_id in ("EVD-OTHER-K8S", "EVD-MISSING"):
+        assert (
+            repository.edit_approved(
+                user_id="USER-001",
+                evidence_id=evidence_id,
+                edit=CareerEvidenceEdit(title="Unavailable"),
+            )
+            is None
+        )
+        assert (
+            repository.set_lifecycle_status(
+                user_id="USER-001",
+                evidence_id=evidence_id,
+                lifecycle_status=EvidenceLifecycleStatus.ARCHIVED,
+            )
+            is None
+        )

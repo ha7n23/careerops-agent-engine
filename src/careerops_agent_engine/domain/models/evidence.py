@@ -1,12 +1,13 @@
 """Domain models for career evidence and requirement matching."""
 
-from typing import Literal, Self
+from typing import Annotated, Literal, Self
 
 from pydantic import Field, model_validator
 
 from careerops_agent_engine.domain.enums import (
     CVSection,
     EvidenceCategory,
+    EvidenceLifecycleStatus,
     EvidenceOverlapScope,
     EvidenceSourceType,
     MatchStrength,
@@ -157,11 +158,54 @@ class CareerEvidence(DomainModel):
     category: EvidenceCategory
     title: str = Field(min_length=1, max_length=250)
     verification_status: VerificationStatus
+    lifecycle_status: EvidenceLifecycleStatus = EvidenceLifecycleStatus.ACTIVE
 
     technologies: list[str] = Field(default_factory=list)
     capabilities: list[str] = Field(default_factory=list)
     approved_claims: list[str] = Field(default_factory=list)
     source_references: list[SourceReference] = Field(min_length=1)
+
+
+EvidenceEditTitle = Annotated[str, Field(min_length=1, max_length=250)]
+EvidenceEditListValue = Annotated[str, Field(min_length=1, max_length=1_000)]
+
+
+class CareerEvidenceEdit(DomainModel):
+    """Strict user-editable fields for one approved evidence record."""
+
+    category: EvidenceCategory | None = None
+    title: EvidenceEditTitle | None = None
+    technologies: list[EvidenceEditListValue] | None = Field(
+        default=None,
+        max_length=50,
+    )
+    capabilities: list[EvidenceEditListValue] | None = Field(
+        default=None,
+        max_length=50,
+    )
+    approved_claims: list[EvidenceEditListValue] | None = Field(
+        default=None,
+        min_length=1,
+        max_length=50,
+    )
+
+    @model_validator(mode="after")
+    def require_actual_edit(self) -> Self:
+        """Reject empty edit requests."""
+
+        if all(
+            value is None
+            for value in (
+                self.category,
+                self.title,
+                self.technologies,
+                self.capabilities,
+                self.approved_claims,
+            )
+        ):
+            raise ValueError("An evidence edit must change at least one field.")
+
+        return self
 
 
 class EvidenceMatch(DomainModel):
