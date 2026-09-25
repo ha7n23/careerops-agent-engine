@@ -266,3 +266,88 @@ def test_blank_text_source_is_rejected() -> None:
             document_format=CareerDocumentFormat.TEXT,
             data=b" \n\t\n ",
         )
+
+
+def test_pdf_page_count_is_bounded_before_text_extraction() -> None:
+    """Oversized PDFs must fail before iterating through their content."""
+
+    writer = PdfWriter()
+
+    for _ in range(3):
+        writer.add_blank_page(
+            width=612,
+            height=792,
+        )
+
+    output = BytesIO()
+    writer.write(output)
+
+    extractor = NativeDocumentExtractor(max_pdf_pages=2)
+
+    with pytest.raises(
+        DocumentExtractionError,
+        match="maximum supported page count",
+    ):
+        extractor.extract(
+            document_id="DOC-001",
+            document_format=CareerDocumentFormat.PDF,
+            data=output.getvalue(),
+        )
+
+
+def test_docx_extracted_characters_are_bounded() -> None:
+    """Large DOCX text must fail before reaching section parsing."""
+
+    document = Document()
+    document.add_paragraph("A" * 11)
+
+    output = BytesIO()
+    document.save(output)
+
+    extractor = NativeDocumentExtractor(
+        max_extracted_characters=10,
+    )
+
+    with pytest.raises(
+        DocumentExtractionError,
+        match="maximum extracted text length",
+    ):
+        extractor.extract(
+            document_id="DOC-001",
+            document_format=CareerDocumentFormat.DOCX,
+            data=output.getvalue(),
+        )
+
+
+def test_utf8_text_characters_are_bounded() -> None:
+    """Large text input must fail before reaching section parsing."""
+
+    extractor = NativeDocumentExtractor(
+        max_extracted_characters=10,
+    )
+
+    with pytest.raises(
+        DocumentExtractionError,
+        match="maximum extracted text length",
+    ):
+        extractor.extract(
+            document_id="DOC-TEXT-001",
+            document_format=CareerDocumentFormat.TEXT,
+            data=b"12345678901",
+        )
+
+
+def test_extractor_requires_positive_limits() -> None:
+    """Extraction bounds must not be disabled accidentally."""
+
+    with pytest.raises(
+        ValueError,
+        match="PDF page count must be positive",
+    ):
+        NativeDocumentExtractor(max_pdf_pages=0)
+
+    with pytest.raises(
+        ValueError,
+        match="character count must be positive",
+    ):
+        NativeDocumentExtractor(max_extracted_characters=0)

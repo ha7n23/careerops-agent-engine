@@ -1,5 +1,10 @@
 """Tests for CV document preparation orchestration."""
 
+import pytest
+
+from careerops_agent_engine.application.exceptions import (
+    DocumentExtractionError,
+)
 from careerops_agent_engine.application.services.cv_document_preparation import (
     CVDocumentPreparationService,
     merge_warnings,
@@ -164,3 +169,123 @@ def test_merge_warnings_preserves_order_and_removes_duplicates() -> None:
         "Warning B",
         "Warning C",
     ]
+
+
+def test_prepare_rejects_excessive_extracted_text_before_parsing() -> None:
+    """Oversized extracted text must not reach the section parser."""
+
+    extracted = ExtractedDocumentText(
+        document_id="DOC-001",
+        text="A" * 11,
+        page_count=1,
+        paragraph_count=None,
+        warnings=[],
+    )
+
+    parser = FakeSectionParser(
+        ParsedCVDocument(
+            document_id="DOC-001",
+            sections=[],
+        )
+    )
+
+    service = CVDocumentPreparationService(
+        extraction_service=FakeExtractionService(extracted),
+        section_parser=parser,
+        max_extracted_characters=10,
+    )
+
+    with pytest.raises(
+        DocumentExtractionError,
+        match="maximum extracted text length",
+    ):
+        service.prepare(
+            user_id="USER-001",
+            document=build_document(),
+        )
+
+    assert parser.document is None
+
+
+def test_prepare_rejects_too_many_sections() -> None:
+    """Excessive parsed sections must not reach proposal generation."""
+
+    extracted = ExtractedDocumentText(
+        document_id="DOC-001",
+        text="Projects\nProject A\nProjects\nProject B",
+        page_count=1,
+        paragraph_count=None,
+        warnings=[],
+    )
+
+    parsed = ParsedCVDocument(
+        document_id="DOC-001",
+        sections=[
+            ParsedCVSection(
+                section=CVSection.PROJECTS,
+                heading="Projects",
+                text="Project A",
+                order_index=0,
+            ),
+            ParsedCVSection(
+                section=CVSection.PROJECTS,
+                heading="Projects",
+                text="Project B",
+                order_index=1,
+            ),
+        ],
+    )
+
+    service = CVDocumentPreparationService(
+        extraction_service=FakeExtractionService(extracted),
+        section_parser=FakeSectionParser(parsed),
+        max_sections=1,
+    )
+
+    with pytest.raises(
+        DocumentExtractionError,
+        match="too many recognised CV sections",
+    ):
+        service.prepare(
+            user_id="USER-001",
+            document=build_document(),
+        )
+
+
+def test_preparation_requires_positive_limits() -> None:
+    """Application-layer document bounds must not be disabled."""
+
+    extracted = ExtractedDocumentText(
+        document_id="DOC-001",
+        text="Projects\nCareerOps",
+        page_count=1,
+        paragraph_count=None,
+        warnings=[],
+    )
+
+    parser = FakeSectionParser(
+        ParsedCVDocument(
+            document_id="DOC-001",
+            sections=[],
+        )
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="character count must be positive",
+    ):
+        CVDocumentPreparationService(
+            extraction_service=FakeExtractionService(extracted),
+            section_parser=parser,
+            max_extracted_characters=0,
+        )
+
+    with pytest.raises(
+        ValueError,
+        match="section count must be positive",
+    ):
+        CVDocumentPreparationService(
+            extraction_service=FakeExtractionService(extracted),
+            section_parser=parser,
+            max_sections=0,
+        )

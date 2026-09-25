@@ -1,10 +1,13 @@
 """Application orchestration for extracted and parsed CV documents."""
 
+from careerops_agent_engine.application.exceptions import (
+    DocumentExtractionError,
+)
+from careerops_agent_engine.application.ports.career_document_extraction import (
+    CareerDocumentExtraction,
+)
 from careerops_agent_engine.application.ports.cv_section_parser import (
     CVSectionParser,
-)
-from careerops_agent_engine.application.services.cv_document_extraction import (
-    CVDocumentExtractionService,
 )
 from careerops_agent_engine.domain.enums import (
     CareerDocumentFormat,
@@ -15,6 +18,9 @@ from careerops_agent_engine.domain.models.document import (
     ParsedCVDocument,
 )
 
+DEFAULT_MAX_EXTRACTED_CHARACTERS = 30_000
+DEFAULT_MAX_SECTIONS = 20
+
 
 class CVDocumentPreparationService:
     """Extract and deterministically structure one uploaded CV."""
@@ -22,13 +28,23 @@ class CVDocumentPreparationService:
     def __init__(
         self,
         *,
-        extraction_service: CVDocumentExtractionService,
+        extraction_service: CareerDocumentExtraction,
         section_parser: CVSectionParser,
+        max_extracted_characters: int = DEFAULT_MAX_EXTRACTED_CHARACTERS,
+        max_sections: int = DEFAULT_MAX_SECTIONS,
     ) -> None:
-        """Store document-processing dependencies."""
+        """Store document-processing dependencies and safety bounds."""
+
+        if max_extracted_characters < 1:
+            raise ValueError("Maximum extracted character count must be positive.")
+
+        if max_sections < 1:
+            raise ValueError("Maximum section count must be positive.")
 
         self._extraction_service = extraction_service
         self._section_parser = section_parser
+        self._max_extracted_characters = max_extracted_characters
+        self._max_sections = max_sections
 
     def prepare(
         self,
@@ -43,7 +59,17 @@ class CVDocumentPreparationService:
             document=document,
         )
 
+        if len(extracted.text) > self._max_extracted_characters:
+            raise DocumentExtractionError(
+                "The document exceeds the maximum extracted text length."
+            )
+
         parsed = self._section_parser.parse(document=extracted)
+
+        if len(parsed.sections) > self._max_sections:
+            raise DocumentExtractionError(
+                "The document contains too many recognised CV sections."
+            )
 
         if parsed.document_id != document.document_id:
             raise RuntimeError(

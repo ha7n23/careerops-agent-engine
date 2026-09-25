@@ -101,9 +101,27 @@ class Settings(BaseSettings):
     )
 
     document_upload_max_bytes: int = Field(
-        default=10 * 1024 * 1024,
+        default=5 * 1024 * 1024,
         ge=1024,
-        le=25 * 1024 * 1024,
+        le=10 * 1024 * 1024,
+    )
+
+    document_pdf_max_pages: int = Field(
+        default=15,
+        ge=1,
+        le=30,
+    )
+
+    document_extraction_max_characters: int = Field(
+        default=30_000,
+        ge=5_000,
+        le=100_000,
+    )
+
+    document_max_sections: int = Field(
+        default=20,
+        ge=1,
+        le=50,
     )
 
     document_storage_root: Path = Path(".careerops_data/documents")

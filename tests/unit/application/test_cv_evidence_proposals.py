@@ -331,3 +331,17 @@ def test_proposal_preserves_manual_text_provenance() -> None:
 
     assert source.source_type is EvidenceSourceType.MANUAL_ENTRY
     assert source.source_id == "DOC-TEXT-001"
+
+
+def test_excessive_candidate_count_is_rejected() -> None:
+    """One extraction cannot create an unbounded review queue."""
+
+    service = CVEvidenceProposalService(
+        extractor=FakeCVEvidenceExtractor([build_valid_candidate() for _ in range(31)])
+    )
+
+    with pytest.raises(
+        CVEvidenceProposalValidationError,
+        match="maximum supported candidate count",
+    ):
+        service.generate(document=build_document())

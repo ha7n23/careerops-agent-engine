@@ -9,6 +9,8 @@ from careerops_agent_engine.domain.models.evidence import (
     CareerEvidenceCandidate,
 )
 
+MAX_CV_EVIDENCE_CANDIDATES = 30
+
 
 class CVEvidenceExtractor(Protocol):
     """Extract candidate evidence from a parsed CV."""
