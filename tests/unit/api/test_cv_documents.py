@@ -165,6 +165,7 @@ def client(
         upload_service=upload_service,
         repository=document_repository,
         storage=document_storage,
+        max_text_characters=100,
     )
 
     app.dependency_overrides[get_cv_document_ingestion_service] = lambda: service
@@ -382,3 +383,132 @@ def test_user_path_in_filename_is_not_returned(
     assert response.status_code == 201
 
     assert response.json()["original_filename"] == "cv.pdf"
+
+
+def test_text_evidence_submission_returns_safe_metadata(
+    client: TestClient,
+    document_storage: FakeDocumentStorage,
+    document_repository: FakeDocumentRepository,
+) -> None:
+    """Valid textarea evidence should enter the shared document pipeline."""
+
+    response = client.post(
+        "/api/v1/cv-documents/text",
+        headers={
+            "X-User-ID": "USER-001",
+        },
+        json={
+            "title": "AWS deployment evidence",
+            "content": (
+                "Deployed a containerised FastAPI application to AWS.\r\n"
+                "Used Docker for packaging."
+            ),
+        },
+    )
+
+    assert response.status_code == 201
+
+    body = response.json()
+
+    expected_data = (
+        b"Deployed a containerised FastAPI application to AWS.\n"
+        b"Used Docker for packaging."
+    )
+
+    assert body["original_filename"] == "AWS deployment evidence.txt"
+    assert body["document_format"] == "text"
+    assert body["media_type"] == "text/plain; charset=utf-8"
+    assert body["size_bytes"] == len(expected_data)
+    assert body["status"] == "uploaded"
+    assert body["document_id"].startswith("DOC-")
+    assert "storage_key" not in body
+
+    assert list(document_storage.saved.values()) == [expected_data]
+
+    persisted = document_repository.get(
+        user_id="USER-001",
+        document_id=body["document_id"],
+    )
+
+    assert persisted is not None
+    assert persisted.document_format is CareerDocumentFormat.TEXT
+
+
+def test_blank_text_evidence_returns_422(
+    client: TestClient,
+    document_storage: FakeDocumentStorage,
+) -> None:
+    """Whitespace-only textarea content must fail before storage."""
+
+    response = client.post(
+        "/api/v1/cv-documents/text",
+        headers={
+            "X-User-ID": "USER-001",
+        },
+        json={
+            "title": "Empty notes",
+            "content": " \r\n\t ",
+        },
+    )
+
+    assert response.status_code == 422
+    assert "cannot be empty" in response.json()["detail"]
+    assert document_storage.saved == {}
+
+
+def test_text_evidence_above_runtime_limit_returns_422(
+    client: TestClient,
+    document_storage: FakeDocumentStorage,
+) -> None:
+    """The configured pasted-text boundary must be enforced."""
+
+    response = client.post(
+        "/api/v1/cv-documents/text",
+        headers={
+            "X-User-ID": "USER-001",
+        },
+        json={
+            "title": "Oversized notes",
+            "content": "A" * 101,
+        },
+    )
+
+    assert response.status_code == 422
+    assert "maximum allowed length" in response.json()["detail"]
+    assert document_storage.saved == {}
+
+
+def test_text_evidence_requires_authenticated_user(
+    client: TestClient,
+) -> None:
+    """Textarea ingestion must retain the existing user boundary."""
+
+    response = client.post(
+        "/api/v1/cv-documents/text",
+        json={
+            "title": "Python evidence",
+            "content": "Built Python APIs using FastAPI.",
+        },
+    )
+
+    assert response.status_code == 401
+
+
+def test_text_evidence_rejects_client_supplied_user_id(
+    client: TestClient,
+) -> None:
+    """The request body must not allow user-scope impersonation."""
+
+    response = client.post(
+        "/api/v1/cv-documents/text",
+        headers={
+            "X-User-ID": "USER-001",
+        },
+        json={
+            "title": "Python evidence",
+            "content": "Built Python APIs using FastAPI.",
+            "user_id": "USER-OTHER",
+        },
+    )
+
+    assert response.status_code == 422

@@ -4,6 +4,10 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from careerops_agent_engine.application.services.cv_document_ingestion import (
+    DEFAULT_MAX_TEXT_CHARACTERS,
+    MAX_TEXT_TITLE_CHARACTERS,
+)
 from careerops_agent_engine.domain.enums import (
     CareerDocumentFormat,
     CareerDocumentStatus,
@@ -24,6 +28,21 @@ from careerops_agent_engine.domain.models.evidence_audit import (
 from careerops_agent_engine.domain.models.evidence_review import (
     EvidenceReviewResult,
 )
+
+
+class TextEvidenceSourceRequest(BaseModel):
+    """Validated pasted-text evidence submitted by the frontend."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(
+        min_length=1,
+        max_length=MAX_TEXT_TITLE_CHARACTERS,
+    )
+    content: str = Field(
+        min_length=1,
+        max_length=DEFAULT_MAX_TEXT_CHARACTERS,
+    )
 
 
 class CareerDocumentUploadResponse(BaseModel):

@@ -22,6 +22,7 @@ from careerops_agent_engine.api.schemas.cv_documents import (
     CareerDocumentHistoryResponse,
     CareerDocumentUploadResponse,
     CVEvidenceReviewRunResponse,
+    TextEvidenceSourceRequest,
 )
 from careerops_agent_engine.application.exceptions import (
     CareerDocumentUnavailableError,
@@ -138,6 +139,44 @@ async def upload_cv_document(
 
     finally:
         await file.close()
+
+    return CareerDocumentUploadResponse.from_domain(document)
+
+
+@router.post(
+    "/text",
+    response_model=CareerDocumentUploadResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a pasted-text evidence source",
+)
+def create_text_evidence_source(
+    request: TextEvidenceSourceRequest,
+    service: CVDocumentIngestionServiceDependency,
+    user_id: AuthenticatedUserIdDependency,
+) -> CareerDocumentUploadResponse:
+    """Validate and securely store one user-owned text evidence source."""
+
+    try:
+        document = service.ingest_text(
+            user_id=user_id,
+            title=request.title,
+            content=request.content,
+        )
+
+    except DocumentUploadValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+
+    except FileExistsError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "The document could not be stored "
+                "because its identifier already exists."
+            ),
+        ) from exc
 
     return CareerDocumentUploadResponse.from_domain(document)
 
