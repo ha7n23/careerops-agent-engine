@@ -1,4 +1,4 @@
-"""Application port for native career-document text extraction."""
+"""Application port for native career-source text extraction."""
 
 from typing import Protocol
 
@@ -11,7 +11,7 @@ from careerops_agent_engine.domain.models.document import (
 
 
 class DocumentExtractor(Protocol):
-    """Extract native text from validated document bytes."""
+    """Extract text from validated source bytes."""
 
     def extract(
         self,

@@ -12,7 +12,6 @@ from careerops_agent_engine.application.ports.cv_evidence_extractor import (
 from careerops_agent_engine.domain.enums import (
     CVSection,
     EvidenceCategory,
-    EvidenceSourceType,
 )
 from careerops_agent_engine.domain.models.document import (
     ParsedCVDocument,
@@ -121,7 +120,7 @@ class CVEvidenceProposalService:
                     claims=list(candidate.claims),
                     source_references=[
                         SourceReference(
-                            source_type=(EvidenceSourceType.UPLOADED_CV),
+                            source_type=document.source_type,
                             source_id=(document.document_id),
                             source_excerpt=(candidate.source_excerpt),
                         )

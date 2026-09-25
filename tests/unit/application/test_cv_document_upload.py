@@ -244,3 +244,20 @@ def test_client_path_is_not_preserved_as_filename() -> None:
     )
 
     assert document.original_filename == "cv.pdf"
+
+
+def test_text_file_is_not_accepted_by_document_upload() -> None:
+    """Pasted text must use its dedicated trusted endpoint later."""
+
+    service = build_service(FakeDocumentStorage())
+
+    with pytest.raises(
+        DocumentUploadValidationError,
+        match="Only valid PDF and DOCX",
+    ):
+        service.upload(
+            user_id="USER-001",
+            original_filename="evidence.txt",
+            declared_media_type="text/plain",
+            data=b"Built CareerOps using Python and FastAPI.",
+        )

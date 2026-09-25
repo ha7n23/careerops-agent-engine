@@ -183,3 +183,30 @@ def test_duplicate_save_does_not_overwrite_existing_bytes(
         )
         == b"original"
     )
+
+
+def test_text_source_uses_private_txt_storage(
+    tmp_path: Path,
+) -> None:
+    """Trusted pasted text should use the shared private storage boundary."""
+
+    storage = build_storage(tmp_path)
+
+    data = b"Built CareerOps using Python and FastAPI."
+
+    storage_key = storage.save(
+        user_id="USER-001",
+        document_id="DOC-TEXT-001",
+        document_format=CareerDocumentFormat.TEXT,
+        data=data,
+    )
+
+    assert storage_key.endswith("/DOC-TEXT-001.txt")
+
+    assert (
+        storage.read(
+            user_id="USER-001",
+            storage_key=storage_key,
+        )
+        == data
+    )

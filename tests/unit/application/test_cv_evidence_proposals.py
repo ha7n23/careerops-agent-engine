@@ -309,3 +309,25 @@ def test_evidence_proposal_id_ignores_generated_title() -> None:
     )
 
     assert original_id == renamed_id
+
+
+def test_proposal_preserves_manual_text_provenance() -> None:
+    """Text-derived proposals must not be labelled as uploaded CV evidence."""
+
+    service = CVEvidenceProposalService(
+        extractor=FakeCVEvidenceExtractor([build_valid_candidate()])
+    )
+
+    text_document = build_document().model_copy(
+        update={
+            "document_id": "DOC-TEXT-001",
+            "source_type": EvidenceSourceType.MANUAL_ENTRY,
+        }
+    )
+
+    proposals = service.generate(document=text_document)
+
+    source = proposals[0].source_references[0]
+
+    assert source.source_type is EvidenceSourceType.MANUAL_ENTRY
+    assert source.source_id == "DOC-TEXT-001"

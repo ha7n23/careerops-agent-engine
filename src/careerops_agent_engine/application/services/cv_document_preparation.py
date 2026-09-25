@@ -6,6 +6,10 @@ from careerops_agent_engine.application.ports.cv_section_parser import (
 from careerops_agent_engine.application.services.cv_document_extraction import (
     CVDocumentExtractionService,
 )
+from careerops_agent_engine.domain.enums import (
+    CareerDocumentFormat,
+    EvidenceSourceType,
+)
 from careerops_agent_engine.domain.models.document import (
     CareerDocument,
     ParsedCVDocument,
@@ -53,6 +57,11 @@ class CVDocumentPreparationService:
 
         return ParsedCVDocument(
             document_id=parsed.document_id,
+            source_type=(
+                EvidenceSourceType.MANUAL_ENTRY
+                if document.document_format is CareerDocumentFormat.TEXT
+                else EvidenceSourceType.UPLOADED_CV
+            ),
             preamble_text=parsed.preamble_text,
             sections=list(parsed.sections),
             warnings=warnings,

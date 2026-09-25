@@ -209,3 +209,60 @@ def test_pdf_extracts_native_text() -> None:
     assert result.page_count == 1
     assert result.paragraph_count is None
     assert result.warnings == []
+
+
+def test_utf8_text_is_normalised_through_shared_extractor() -> None:
+    """Pasted text should use the same trusted extraction contract."""
+
+    extractor = NativeDocumentExtractor()
+
+    result = extractor.extract(
+        document_id="DOC-TEXT-001",
+        document_format=CareerDocumentFormat.TEXT,
+        data=(
+            "\ufeffProjects\n"
+            "  Built   CareerOps with Python.  \n"
+            "\n"
+            "Deployed with Docker."
+        ).encode("utf-8"),
+    )
+
+    assert result.document_id == "DOC-TEXT-001"
+    assert result.text == (
+        "Projects\nBuilt CareerOps with Python.\nDeployed with Docker."
+    )
+    assert result.page_count is None
+    assert result.paragraph_count == 3
+    assert result.warnings == []
+
+
+def test_invalid_utf8_text_raises_stable_error() -> None:
+    """Corrupted stored text must fail at the extraction boundary."""
+
+    extractor = NativeDocumentExtractor()
+
+    with pytest.raises(
+        DocumentExtractionError,
+        match="text source is not valid UTF-8",
+    ):
+        extractor.extract(
+            document_id="DOC-TEXT-001",
+            document_format=CareerDocumentFormat.TEXT,
+            data=b"\xff\xfe\xfa",
+        )
+
+
+def test_blank_text_source_is_rejected() -> None:
+    """Whitespace-only text must not enter evidence extraction."""
+
+    extractor = NativeDocumentExtractor()
+
+    with pytest.raises(
+        DocumentTextUnavailableError,
+        match="text source contains no usable text",
+    ):
+        extractor.extract(
+            document_id="DOC-TEXT-001",
+            document_format=CareerDocumentFormat.TEXT,
+            data=b" \n\t\n ",
+        )

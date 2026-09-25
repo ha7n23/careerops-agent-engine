@@ -1,4 +1,4 @@
-"""Native PDF and DOCX text extraction."""
+"""Native PDF, DOCX and UTF-8 text extraction."""
 
 from io import BytesIO
 from zipfile import BadZipFile
@@ -21,7 +21,7 @@ from careerops_agent_engine.domain.models.document import (
 
 
 class NativeDocumentExtractor:
-    """Extract native text from validated PDF and DOCX bytes."""
+    """Extract text from validated PDF, DOCX and UTF-8 bytes."""
 
     def extract(
         self,
@@ -40,6 +40,12 @@ class NativeDocumentExtractor:
 
         if document_format is CareerDocumentFormat.DOCX:
             return extract_docx(
+                document_id=document_id,
+                data=data,
+            )
+
+        if document_format is CareerDocumentFormat.TEXT:
+            return extract_text(
                 document_id=document_id,
                 data=data,
             )
@@ -156,6 +162,32 @@ def extract_docx(
         text=text,
         page_count=None,
         paragraph_count=paragraph_count,
+        warnings=[],
+    )
+
+
+def extract_text(
+    *,
+    document_id: str,
+    data: bytes,
+) -> ExtractedDocumentText:
+    """Extract and normalise one trusted UTF-8 text source."""
+
+    try:
+        raw_text = data.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise DocumentExtractionError("The text source is not valid UTF-8.") from exc
+
+    text = normalise_text(raw_text)
+
+    if not text:
+        raise DocumentTextUnavailableError("The text source contains no usable text.")
+
+    return ExtractedDocumentText(
+        document_id=document_id,
+        text=text,
+        page_count=None,
+        paragraph_count=len(text.splitlines()),
         warnings=[],
     )
 

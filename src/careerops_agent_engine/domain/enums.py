@@ -94,6 +94,7 @@ class CareerDocumentFormat(StrEnum):
 
     PDF = "pdf"
     DOCX = "docx"
+    TEXT = "text"
 
 
 class CareerDocumentStatus(StrEnum):

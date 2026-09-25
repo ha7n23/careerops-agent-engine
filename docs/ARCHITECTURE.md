@@ -182,7 +182,7 @@ The Evidence Registry is the central trust boundary for career claims.
 A CV upload moves through:
 
 1. file validation and private storage;
-2. native PDF/DOCX extraction;
+2. native PDF/DOCX or trusted UTF-8 text extraction;
 3. deterministic section parsing;
 4. structured LLM evidence proposals;
 5. grounding and duplicate/overlap detection;
@@ -190,6 +190,8 @@ A CV upload moves through:
 7. transactional persistence of the accepted evidence and review audit record.
 
 Only approved evidence is exposed to downstream job analysis.
+
+`CareerDocument` acts as the durable trusted-source envelope for all three formats. A text source is UTF-8 encoded, hashed, stored under the same private user namespace, persisted with `CareerDocumentFormat.TEXT`, and passed through the same extraction, section parsing, proposal, duplicate-detection, review, and audit boundaries. Prepared sources carry trusted provenance: PDF/DOCX records produce `uploaded_cv` references, while text records produce `manual_entry` references. The existing multipart upload endpoint intentionally remains PDF/DOCX-only; a dedicated validated textarea endpoint is added separately so arbitrary file uploads cannot bypass format validation.
 
 ### Evidence discovery agent
 
@@ -451,7 +453,7 @@ Cloud deployment is deliberately deferred. The project proves deployment readine
 
 ## 15. Testing strategy
 
-The current verified baseline is **465 passed, 9 skipped**.
+The current verified baseline is **473 passed, 9 skipped**.
 
 The suite covers:
 
