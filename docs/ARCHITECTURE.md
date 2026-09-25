@@ -193,6 +193,8 @@ Only approved evidence is exposed to downstream job analysis.
 
 `CareerDocument` acts as the durable trusted-source envelope for all three formats. A text source is UTF-8 encoded, hashed, stored under the same private user namespace, persisted with `CareerDocumentFormat.TEXT`, and passed through the same extraction, section parsing, proposal, duplicate-detection, review, and audit boundaries. Prepared sources carry trusted provenance: PDF/DOCX records produce `uploaded_cv` references, while text records produce `manual_entry` references. The existing multipart upload endpoint intentionally remains PDF/DOCX-only; a dedicated validated textarea endpoint is added separately so arbitrary file uploads cannot bypass format validation.
 
+Master-CV processing is deliberately bounded before evidence extraction. The default contract accepts uploads up to 5 MiB, native PDFs up to 15 pages, extracted text up to 30,000 characters, and parsed documents up to 20 sections. DOCX inspection additionally permits at most 500 archive entries and 10 MiB of expanded package content. Structured evidence extraction exposes and enforces a maximum of 30 candidates. Limits fail explicitly without truncation; preparation failures make no evidence-model call, persist no review run, and leave the document retryable.
+
 ### Evidence discovery agent
 
 `LangChainEvidenceDiscoveryAgent` is intentionally bounded:
@@ -205,7 +207,7 @@ Only approved evidence is exposed to downstream job analysis.
 
 This makes the agent useful for semantic search/reasoning without giving it authority to manufacture career history.
 
-Before running evidence discovery for a requirement set, the runner performs one bounded approved-evidence existence check. If the authenticated user has no approved Evidence Registry entries, CareerOps returns one deterministic `MatchStrength.NONE` gap per requirement without invoking the tool-calling model. Before running evidence discovery for a requirement set, the runner performs one bounded approved-evidence existence check. If the authenticated user has no approved Evidence Registry entries, CareerOps returns one deterministic `MatchStrength.NONE` gap per requirement without invoking the tool-calling model. Users with approved evidence are processed through one bounded batch agent run. The agent performs a minimal set of combined searches and returns exactly one match per requirement. Deterministic application validation rejects missing, duplicate, unknown, unobserved, inaccessible, or cross-user evidence references and restores the original requirement order.
+Before running evidence discovery for a requirement set, the runner performs one bounded approved-evidence existence check. If the authenticated user has no approved Evidence Registry entries, CareerOps returns one deterministic `MatchStrength.NONE` gap per requirement without invoking the tool-calling model. Users with approved evidence are processed through one bounded batch agent run. The agent performs a minimal set of combined searches and returns exactly one match per requirement. Deterministic application validation rejects missing, duplicate, unknown, unobserved, inaccessible, or cross-user evidence references and restores the original requirement order.
 
 The approved Evidence Registry is also exposed through read-only, authenticated API endpoints for downstream gateways and frontends. Listing is bounded and user scoped; individual retrieval uses the same opaque `404` response for unknown and cross-user identifiers. Pending or rejected evidence is never exposed through this interface.
 
@@ -425,6 +427,10 @@ CV upload validation includes:
 - filename-extension and MIME consistency checks;
 - DOCX ZIP-entry and total-uncompressed-size limits;
 - opaque user namespaces and traversal-resistant storage-key validation.
+- bounded file reads that stop after the configured upload limit plus one byte;
+- native PDF page, extracted-character, and parsed-section limits before LLM execution;
+- a structured-output and application-level evidence-candidate limit;
+- fail-fast rejection without partial persistence or silent truncation;
 
 ## 14. Runtime and CI
 
@@ -453,7 +459,7 @@ Cloud deployment is deliberately deferred. The project proves deployment readine
 
 ## 15. Testing strategy
 
-The current verified baseline is **473 passed, 9 skipped**.
+The current verified baseline is **489 passed, 9 skipped**.
 
 The suite covers:
 
@@ -469,7 +475,7 @@ The suite covers:
 
 The nine default skips are explicit live LLM or live document-runtime tests gated behind environment flags. This keeps ordinary CI deterministic while retaining opt-in real-provider/runtime proofs.
 
-Strict mypy currently checks **153 source files**; Ruff covers `src` and `tests`.
+Strict mypy currently checks **154 source files**; Ruff covers `src` and `tests`.
 
 ## 16. Trade-offs and extension points
 

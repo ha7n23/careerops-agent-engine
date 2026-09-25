@@ -240,14 +240,21 @@ def get_cv_document_ingestion_service() -> CVDocumentIngestionService:
 def get_cv_document_preparation_service() -> CVDocumentPreparationService:
     """Create native extraction and deterministic CV preparation."""
 
+    settings = get_settings()
+
     extraction_service = CVDocumentExtractionService(
         storage=get_document_storage(),
-        extractor=NativeDocumentExtractor(),
+        extractor=NativeDocumentExtractor(
+            max_pdf_pages=settings.document_pdf_max_pages,
+            max_extracted_characters=(settings.document_extraction_max_characters),
+        ),
     )
 
     return CVDocumentPreparationService(
         extraction_service=extraction_service,
         section_parser=DeterministicCVSectionParser(),
+        max_extracted_characters=(settings.document_extraction_max_characters),
+        max_sections=settings.document_max_sections,
     )
 
 

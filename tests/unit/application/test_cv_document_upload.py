@@ -1,7 +1,7 @@
 """Tests for secure career-document uploads."""
 
 from io import BytesIO
-from zipfile import ZipFile
+from zipfile import ZIP_DEFLATED, ZipFile
 
 import pytest
 
@@ -260,4 +260,48 @@ def test_text_file_is_not_accepted_by_document_upload() -> None:
             original_filename="evidence.txt",
             declared_media_type="text/plain",
             data=b"Built CareerOps using Python and FastAPI.",
+        )
+
+
+def test_highly_compressed_oversized_docx_is_rejected() -> None:
+    """Compressed uploads must respect the uncompressed archive bound."""
+
+    output = BytesIO()
+
+    with ZipFile(
+        output,
+        mode="w",
+        compression=ZIP_DEFLATED,
+    ) as archive:
+        archive.writestr(
+            "[Content_Types].xml",
+            "<Types />",
+        )
+        archive.writestr(
+            "word/document.xml",
+            "<document />",
+        )
+        archive.writestr(
+            "word/media/oversized.bin",
+            b"A" * (10 * 1024 * 1024 + 1),
+        )
+
+    compressed_data = output.getvalue()
+
+    assert len(compressed_data) < 1024 * 1024
+
+    service = build_service(FakeDocumentStorage())
+
+    with pytest.raises(
+        DocumentUploadValidationError,
+        match="Only valid PDF and DOCX",
+    ):
+        service.upload(
+            user_id="USER-001",
+            original_filename="oversized.docx",
+            declared_media_type=(
+                "application/vnd.openxmlformats-officedocument."
+                "wordprocessingml.document"
+            ),
+            data=compressed_data,
         )

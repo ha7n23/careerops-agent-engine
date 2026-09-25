@@ -2,6 +2,9 @@
 
 from pydantic import Field
 
+from careerops_agent_engine.application.ports.cv_evidence_extractor import (
+    MAX_CV_EVIDENCE_CANDIDATES,
+)
 from careerops_agent_engine.domain.enums import (
     CVSection,
     EvidenceCategory,
@@ -146,4 +149,7 @@ class ExtractedCareerEvidenceCandidate(DomainModel):
 class ExtractedCareerEvidenceSet(DomainModel):
     """Structured evidence candidates returned by the provider."""
 
-    candidates: list[ExtractedCareerEvidenceCandidate]
+    candidates: list[ExtractedCareerEvidenceCandidate] = Field(
+        default_factory=list,
+        max_length=MAX_CV_EVIDENCE_CANDIDATES,
+    )

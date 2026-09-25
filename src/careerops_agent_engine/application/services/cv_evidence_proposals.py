@@ -7,6 +7,7 @@ from careerops_agent_engine.application.exceptions import (
     CVEvidenceProposalValidationError,
 )
 from careerops_agent_engine.application.ports.cv_evidence_extractor import (
+    MAX_CV_EVIDENCE_CANDIDATES,
     CVEvidenceExtractor,
 )
 from careerops_agent_engine.domain.enums import (
@@ -72,6 +73,11 @@ class CVEvidenceProposalService:
         """Extract, validate, and attach trusted provenance."""
 
         candidates = self._extractor.extract(document=document)
+
+        if len(candidates) > MAX_CV_EVIDENCE_CANDIDATES:
+            raise CVEvidenceProposalValidationError(
+                "Evidence extraction exceeded the maximum supported candidate count."
+            )
 
         sections_by_index = build_section_index(document.sections)
 

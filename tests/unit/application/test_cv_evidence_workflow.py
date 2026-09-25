@@ -2,6 +2,9 @@
 
 from hashlib import sha256
 
+import pytest
+
+from careerops_agent_engine.application.exceptions import DocumentExtractionError
 from careerops_agent_engine.application.services.cv_document_extraction import (
     CVDocumentExtractionService,
 )
@@ -376,6 +379,7 @@ def build_document() -> CareerDocument:
 def build_workflow(
     *,
     return_candidates: bool = True,
+    max_extracted_characters: int = 30_000,
 ) -> tuple[
     CVEvidenceWorkflowService,
     FakeDocumentRepository,
@@ -400,7 +404,8 @@ def build_workflow(
 
     preparation_service = CVDocumentPreparationService(
         extraction_service=extraction_service,
-        section_parser=(DeterministicCVSectionParser()),
+        section_parser=DeterministicCVSectionParser(),
+        max_extracted_characters=max_extracted_characters,
     )
 
     proposal_service = CVEvidenceProposalService(extractor=candidate_extractor)
@@ -646,3 +651,36 @@ def test_identical_completed_retry_does_not_write_second_review() -> None:
         )
         == 1
     )
+
+
+def test_oversized_document_stops_before_model_and_persistence() -> None:
+    """Oversized extracted text must fail before LLM work or state mutation."""
+
+    (
+        workflow,
+        document_repository,
+        audit_repository,
+        native_extractor,
+        candidate_extractor,
+    ) = build_workflow(max_extracted_characters=10)
+
+    with pytest.raises(
+        DocumentExtractionError,
+        match="maximum extracted text length",
+    ):
+        workflow.start_review(
+            user_id="USER-001",
+            document_id="DOC-001",
+        )
+
+    assert native_extractor.call_count == 1
+    assert candidate_extractor.call_count == 0
+    assert audit_repository.save_run_calls == 0
+
+    document = document_repository.get(
+        user_id="USER-001",
+        document_id="DOC-001",
+    )
+
+    assert document is not None
+    assert document.status is CareerDocumentStatus.UPLOADED
