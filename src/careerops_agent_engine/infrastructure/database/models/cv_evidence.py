@@ -37,7 +37,7 @@ class CareerDocumentRecord(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "document_format IN ('pdf', 'docx')",
+            "document_format IN ('pdf', 'docx', 'text')",
             name="document_format_valid",
         ),
         CheckConstraint(

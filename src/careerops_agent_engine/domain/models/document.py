@@ -8,6 +8,7 @@ from careerops_agent_engine.domain.enums import (
     CareerDocumentFormat,
     CareerDocumentStatus,
     CVSection,
+    EvidenceSourceType,
 )
 from careerops_agent_engine.domain.models.base import DomainModel
 
@@ -125,6 +126,8 @@ class ParsedCVDocument(DomainModel):
         min_length=1,
         max_length=64,
     )
+
+    source_type: EvidenceSourceType = EvidenceSourceType.UPLOADED_CV
 
     preamble_text: str | None = None
 

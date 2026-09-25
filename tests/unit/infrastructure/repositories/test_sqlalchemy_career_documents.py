@@ -183,3 +183,33 @@ def test_document_summaries_are_bounded_newest_first_and_user_scoped(
         )
         == []
     )
+
+
+def test_text_source_metadata_round_trips(
+    repository: SqlAlchemyCareerDocumentRepository,
+) -> None:
+    """Text sources should use the same durable metadata repository."""
+
+    document = CareerDocument(
+        document_id="DOC-TEXT-001",
+        original_filename="pasted-evidence.txt",
+        document_format=CareerDocumentFormat.TEXT,
+        media_type="text/plain; charset=utf-8",
+        size_bytes=45,
+        sha256_hex="b" * 64,
+        storage_key="documents/usr-test/DOC-TEXT-001.txt",
+        status=CareerDocumentStatus.UPLOADED,
+    )
+
+    repository.save(
+        user_id="USER-001",
+        document=document,
+    )
+
+    assert (
+        repository.get(
+            user_id="USER-001",
+            document_id="DOC-TEXT-001",
+        )
+        == document
+    )

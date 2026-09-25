@@ -12,6 +12,12 @@ from careerops_agent_engine.domain.enums import (
 
 SAFE_DOCUMENT_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
+STORAGE_SUFFIXES = {
+    CareerDocumentFormat.PDF: ".pdf",
+    CareerDocumentFormat.DOCX: ".docx",
+    CareerDocumentFormat.TEXT: ".txt",
+}
+
 
 class LocalDocumentStorage:
     """Store career-document bytes under a private application root."""
@@ -180,4 +186,6 @@ def build_storage_key(
 
     namespace = build_user_namespace(user_id)
 
-    return f"documents/{namespace}/{document_id}.{document_format.value}"
+    suffix = STORAGE_SUFFIXES[document_format]
+
+    return f"documents/{namespace}/{document_id}{suffix}"
