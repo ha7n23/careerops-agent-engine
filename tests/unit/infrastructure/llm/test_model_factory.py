@@ -57,6 +57,7 @@ def test_create_google_chat_model_uses_selected_profile(
         llm_temperature=0.25,
         llm_timeout_seconds=12.0,
         llm_max_retries=1,
+        llm_max_output_tokens=3_072,
     )
 
     created_model = model_factory.create_chat_model(
@@ -71,6 +72,7 @@ def test_create_google_chat_model_uses_selected_profile(
         temperature=0.25,
         timeout=12.0,
         max_retries=1,
+        max_tokens=3_072,
         thinking_level=expected_thinking_level,
         rate_limiter=rate_limiter,
     )
@@ -97,6 +99,7 @@ def test_create_groq_chat_model_uses_configured_settings(
         llm_temperature=0.5,
         llm_timeout_seconds=15.0,
         llm_max_retries=1,
+        llm_max_output_tokens=3_072,
     )
 
     created_model = model_factory.create_chat_model(
@@ -111,6 +114,7 @@ def test_create_groq_chat_model_uses_configured_settings(
         temperature=0.5,
         timeout=15.0,
         max_retries=1,
+        max_tokens=3_072,
         rate_limiter=rate_limiter,
     )
 

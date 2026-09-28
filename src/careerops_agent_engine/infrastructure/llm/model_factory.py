@@ -72,6 +72,7 @@ def create_chat_model(
             temperature=settings.llm_temperature,
             timeout=settings.llm_timeout_seconds,
             max_retries=settings.llm_max_retries,
+            max_tokens=settings.llm_max_output_tokens,
             thinking_level=thinking_level,
             rate_limiter=rate_limiter,
         )
@@ -89,6 +90,7 @@ def create_chat_model(
                 temperature=settings.llm_temperature,
                 timeout=settings.llm_timeout_seconds,
                 max_retries=settings.llm_max_retries,
+                max_tokens=settings.llm_max_output_tokens,
                 rate_limiter=rate_limiter,
             ),
         )
