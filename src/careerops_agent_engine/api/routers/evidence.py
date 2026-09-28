@@ -26,6 +26,10 @@ from careerops_agent_engine.application.exceptions import (
 from careerops_agent_engine.application.services.evidence_registry import (
     EvidenceRegistryService,
 )
+from careerops_agent_engine.domain.enums import (
+    EvidenceCategory,
+    EvidenceLifecycleStatus,
+)
 
 router = APIRouter(
     prefix="/api/v1/evidence",
@@ -52,21 +56,42 @@ AuthenticatedUserIdDependency = Annotated[
 def list_approved_evidence(
     service: EvidenceRegistryServiceDependency,
     user_id: AuthenticatedUserIdDependency,
+    query: Annotated[
+        str | None,
+        Query(alias="q", min_length=1, max_length=200),
+    ] = None,
+    category: Annotated[
+        EvidenceCategory | None,
+        Query(),
+    ] = None,
+    lifecycle_status: Annotated[
+        EvidenceLifecycleStatus,
+        Query(),
+    ] = EvidenceLifecycleStatus.ACTIVE,
+    offset: Annotated[
+        int,
+        Query(ge=0, le=10_000),
+    ] = 0,
     limit: Annotated[
         int,
         Query(ge=1, le=100),
     ] = 100,
 ) -> EvidenceRegistryListResponse:
-    """List approved evidence belonging to the authenticated user."""
+    """Search, filter and page approved evidence for the authenticated user."""
 
-    evidence = service.list_approved(
+    page = service.query_approved(
         user_id=user_id,
+        query=query,
+        category=category,
+        lifecycle_status=lifecycle_status,
+        offset=offset,
         limit=limit,
     )
 
     return EvidenceRegistryListResponse.from_domain(
-        evidence,
+        page,
         limit=limit,
+        offset=offset,
     )
 
 

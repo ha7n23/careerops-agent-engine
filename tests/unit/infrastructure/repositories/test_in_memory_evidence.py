@@ -4,6 +4,7 @@ import pytest
 
 from careerops_agent_engine.domain.enums import (
     EvidenceCategory,
+    EvidenceLifecycleStatus,
     EvidenceSourceType,
     VerificationStatus,
 )
@@ -154,6 +155,59 @@ def test_list_returns_only_approved_user_records(
         "EVD-LANGGRAPH",
         "EVD-PYTHON",
     }
+
+
+def test_query_filters_searches_and_pages_approved_records(
+    repository: InMemoryEvidenceRepository,
+) -> None:
+    """Registry queries compose deterministic filters and pagination."""
+
+    page = repository.query_approved(
+        user_id="USER-001",
+        query="python",
+        category=None,
+        lifecycle_status=EvidenceLifecycleStatus.ACTIVE,
+        offset=1,
+        limit=1,
+    )
+
+    assert [result.evidence_id for result in page.items] == ["EVD-PYTHON"]
+    assert page.total == 2
+
+    filtered = repository.query_approved(
+        user_id="USER-001",
+        query="langgraph workflow",
+        category=EvidenceCategory.PROJECT,
+        lifecycle_status=EvidenceLifecycleStatus.ACTIVE,
+        offset=0,
+        limit=10,
+    )
+
+    assert [result.evidence_id for result in filtered.items] == ["EVD-LANGGRAPH"]
+
+
+def test_query_can_return_archived_records(
+    repository: InMemoryEvidenceRepository,
+) -> None:
+    """Registry management can page archived approved evidence."""
+
+    repository.set_lifecycle_status(
+        user_id="USER-001",
+        evidence_id="EVD-LANGGRAPH",
+        lifecycle_status=EvidenceLifecycleStatus.ARCHIVED,
+    )
+
+    page = repository.query_approved(
+        user_id="USER-001",
+        query=None,
+        category=None,
+        lifecycle_status=EvidenceLifecycleStatus.ARCHIVED,
+        offset=0,
+        limit=10,
+    )
+
+    assert [result.evidence_id for result in page.items] == ["EVD-LANGGRAPH"]
+    assert page.total == 1
 
 
 def test_duplicate_user_evidence_ids_are_rejected() -> None:
