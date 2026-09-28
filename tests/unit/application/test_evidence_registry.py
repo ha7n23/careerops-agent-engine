@@ -90,6 +90,21 @@ def test_list_returns_only_authenticated_users_evidence() -> None:
     ]
 
 
+def test_query_returns_searchable_filtered_page() -> None:
+    """Registry browsing delegates normalized controls to the repository."""
+
+    page = build_service().query_approved(
+        user_id="USER-001",
+        query="  analytics  ",
+        category=EvidenceCategory.PROJECT,
+        offset=0,
+        limit=10,
+    )
+
+    assert [item.evidence_id for item in page.items] == ["EVD-002"]
+    assert page.total == 1
+
+
 def test_get_returns_one_approved_record() -> None:
     """A user may retrieve their own approved evidence."""
 

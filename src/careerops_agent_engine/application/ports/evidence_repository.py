@@ -1,12 +1,24 @@
 """Application port for accessing approved career evidence."""
 
+from dataclasses import dataclass
 from typing import Protocol
 
-from careerops_agent_engine.domain.enums import EvidenceLifecycleStatus
+from careerops_agent_engine.domain.enums import (
+    EvidenceCategory,
+    EvidenceLifecycleStatus,
+)
 from careerops_agent_engine.domain.models.evidence import (
     CareerEvidence,
     CareerEvidenceEdit,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class EvidenceRegistryPage:
+    """One stable page of user-scoped approved evidence."""
+
+    items: list[CareerEvidence]
+    total: int
 
 
 class EvidenceRepository(Protocol):
@@ -40,6 +52,20 @@ class EvidenceRepository(Protocol):
         limit: int = 100,
     ) -> list[CareerEvidence]:
         """List approved evidence belonging to one user."""
+
+        ...
+
+    def query_approved(
+        self,
+        *,
+        user_id: str,
+        query: str | None,
+        category: EvidenceCategory | None,
+        lifecycle_status: EvidenceLifecycleStatus,
+        offset: int,
+        limit: int,
+    ) -> EvidenceRegistryPage:
+        """Search, filter and page approved evidence for one user."""
 
         ...
 

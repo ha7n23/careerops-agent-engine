@@ -30,12 +30,13 @@ def build_evidence(
     evidence_id: str,
     *,
     title: str,
+    category: EvidenceCategory = EvidenceCategory.PROJECT,
 ) -> CareerEvidence:
     """Create one approved API evidence record."""
 
     return CareerEvidence(
         evidence_id=evidence_id,
-        category=EvidenceCategory.PROJECT,
+        category=category,
         title=title,
         verification_status=VerificationStatus.APPROVED,
         technologies=["Python", "FastAPI"],
@@ -65,6 +66,7 @@ def client() -> Iterator[TestClient]:
                 build_evidence(
                     "EVD-002",
                     title="Analytics API",
+                    category=EvidenceCategory.SKILL,
                 ),
             ],
             "USER-002": [
@@ -105,11 +107,14 @@ def test_list_returns_only_authenticated_users_evidence(
     body = response.json()
 
     assert body["count"] == 2
+    assert body["total"] == 2
     assert body["limit"] == 100
+    assert body["offset"] == 0
+    assert body["has_more"] is False
 
     assert [item["evidence_id"] for item in body["items"]] == [
-        "EVD-001",
         "EVD-002",
+        "EVD-001",
     ]
 
     assert all("user_id" not in item for item in body["items"])
@@ -130,8 +135,68 @@ def test_list_honours_bounded_limit(
     body = response.json()
 
     assert body["count"] == 1
+    assert body["total"] == 2
     assert body["limit"] == 1
+    assert body["offset"] == 0
+    assert body["has_more"] is True
     assert len(body["items"]) == 1
+
+
+def test_list_searches_filters_and_pages_registry(
+    client: TestClient,
+) -> None:
+    """The frontend can combine bounded registry query controls."""
+
+    first_page = client.get(
+        "/api/v1/evidence?q=python&limit=1",
+        headers={"X-User-ID": "USER-001"},
+    )
+
+    assert first_page.status_code == 200
+    first_body = first_page.json()
+    assert [item["evidence_id"] for item in first_body["items"]] == ["EVD-002"]
+    assert first_body["total"] == 2
+    assert first_body["has_more"] is True
+
+    second_page = client.get(
+        "/api/v1/evidence?q=python&limit=1&offset=1",
+        headers={"X-User-ID": "USER-001"},
+    )
+
+    assert second_page.status_code == 200
+    second_body = second_page.json()
+    assert [item["evidence_id"] for item in second_body["items"]] == ["EVD-001"]
+    assert second_body["offset"] == 1
+    assert second_body["has_more"] is False
+
+    filtered = client.get(
+        "/api/v1/evidence?q=analytics&category=skill",
+        headers={"X-User-ID": "USER-001"},
+    )
+
+    assert filtered.status_code == 200
+    assert [item["evidence_id"] for item in filtered.json()["items"]] == ["EVD-002"]
+
+
+def test_list_can_filter_archived_registry_records(
+    client: TestClient,
+) -> None:
+    """Archived evidence remains discoverable for registry management."""
+
+    archived = client.post(
+        "/api/v1/evidence/EVD-001/archive",
+        headers={"X-User-ID": "USER-001"},
+    )
+    assert archived.status_code == 200
+
+    response = client.get(
+        "/api/v1/evidence?lifecycle_status=archived",
+        headers={"X-User-ID": "USER-001"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["total"] == 1
+    assert [item["evidence_id"] for item in response.json()["items"]] == ["EVD-001"]
 
 
 def test_get_returns_frontend_safe_evidence(
@@ -185,6 +250,30 @@ def test_list_rejects_unbounded_limit(
 
     response = client.get(
         "/api/v1/evidence?limit=101",
+        headers={"X-User-ID": "USER-001"},
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "query_string",
+    [
+        "offset=-1",
+        "offset=10001",
+        "category=unknown",
+        "lifecycle_status=deleted",
+        f"q={'x' * 201}",
+    ],
+)
+def test_list_rejects_invalid_query_controls(
+    client: TestClient,
+    query_string: str,
+) -> None:
+    """Registry query controls must remain bounded and typed."""
+
+    response = client.get(
+        f"/api/v1/evidence?{query_string}",
         headers={"X-User-ID": "USER-001"},
     )
 

@@ -4,6 +4,9 @@ from typing import Annotated, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from careerops_agent_engine.application.ports.evidence_repository import (
+    EvidenceRegistryPage,
+)
 from careerops_agent_engine.domain.enums import (
     EvidenceCategory,
     EvidenceLifecycleStatus,
@@ -103,27 +106,34 @@ class CareerEvidenceResponse(BaseModel):
 
 
 class EvidenceRegistryListResponse(BaseModel):
-    """Bounded list of approved evidence records."""
+    """Searchable, filterable page of approved evidence records."""
 
     model_config = ConfigDict(extra="forbid")
 
     items: list[CareerEvidenceResponse]
     count: int = Field(ge=0)
+    total: int = Field(ge=0)
     limit: int = Field(ge=1, le=100)
+    offset: int = Field(ge=0)
+    has_more: bool
 
     @classmethod
     def from_domain(
         cls,
-        evidence: list[CareerEvidence],
+        page: EvidenceRegistryPage,
         *,
         limit: int,
+        offset: int,
     ) -> "EvidenceRegistryListResponse":
-        """Build a bounded public registry response."""
+        """Build public pagination metadata and safe evidence items."""
 
-        items = [CareerEvidenceResponse.from_domain(item) for item in evidence]
+        items = [CareerEvidenceResponse.from_domain(item) for item in page.items]
 
         return cls(
             items=items,
             count=len(items),
+            total=page.total,
             limit=limit,
+            offset=offset,
+            has_more=offset + len(items) < page.total,
         )

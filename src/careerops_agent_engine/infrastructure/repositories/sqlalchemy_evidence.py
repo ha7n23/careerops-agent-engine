@@ -3,9 +3,12 @@
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from careerops_agent_engine.application.ports.evidence_repository import (
+    EvidenceRegistryPage,
+)
 from careerops_agent_engine.domain.enums import (
     EvidenceCategory,
     EvidenceLifecycleStatus,
@@ -24,6 +27,7 @@ from careerops_agent_engine.infrastructure.database.models.evidence import (
 from careerops_agent_engine.infrastructure.repositories.in_memory_evidence import (
     build_searchable_text,
     tokenise,
+    validate_page_bounds,
 )
 
 MAX_SEARCH_CANDIDATES = 500
@@ -120,6 +124,70 @@ class SqlAlchemyEvidenceRepository:
         return self._load_approved_candidates(
             user_id=user_id,
             limit=limit,
+        )
+
+    def query_approved(
+        self,
+        *,
+        user_id: str,
+        query: str | None,
+        category: EvidenceCategory | None,
+        lifecycle_status: EvidenceLifecycleStatus,
+        offset: int,
+        limit: int,
+    ) -> EvidenceRegistryPage:
+        """Search, filter and page approved user evidence in SQL."""
+
+        validate_page_bounds(
+            offset=offset,
+            limit=limit,
+        )
+
+        filters = [
+            CareerEvidenceRecord.user_id == user_id,
+            CareerEvidenceRecord.verification_status
+            == VerificationStatus.APPROVED.value,
+            CareerEvidenceRecord.lifecycle_status == lifecycle_status.value,
+        ]
+
+        if category is not None:
+            filters.append(CareerEvidenceRecord.category == category.value)
+
+        searchable_columns = (
+            func.lower(CareerEvidenceRecord.title),
+            func.lower(cast(CareerEvidenceRecord.technologies, String)),
+            func.lower(cast(CareerEvidenceRecord.capabilities, String)),
+            func.lower(cast(CareerEvidenceRecord.approved_claims, String)),
+        )
+
+        for token in sorted(tokenise(query or "")):
+            filters.append(
+                or_(
+                    *(column.contains(token) for column in searchable_columns),
+                )
+            )
+
+        count_statement = (
+            select(func.count()).select_from(CareerEvidenceRecord).where(*filters)
+        )
+        page_statement = (
+            select(CareerEvidenceRecord)
+            .where(*filters)
+            .order_by(
+                func.lower(CareerEvidenceRecord.title),
+                CareerEvidenceRecord.evidence_id,
+            )
+            .offset(offset)
+            .limit(limit)
+        )
+
+        with self._session_factory() as session:
+            total = session.execute(count_statement).scalar_one()
+            records = session.execute(page_statement).scalars().all()
+
+        return EvidenceRegistryPage(
+            items=[record_to_domain(record) for record in records],
+            total=total,
         )
 
     def get_approved_for_management(

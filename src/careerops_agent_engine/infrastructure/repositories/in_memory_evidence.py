@@ -3,7 +3,11 @@
 import re
 from collections.abc import Mapping, Sequence
 
+from careerops_agent_engine.application.ports.evidence_repository import (
+    EvidenceRegistryPage,
+)
 from careerops_agent_engine.domain.enums import (
+    EvidenceCategory,
     EvidenceLifecycleStatus,
     VerificationStatus,
 )
@@ -18,7 +22,11 @@ TOKEN_PATTERN = re.compile(r"[a-z0-9][a-z0-9+#.-]*")
 def tokenise(value: str) -> set[str]:
     """Convert searchable text into normalised tokens."""
 
-    return set(TOKEN_PATTERN.findall(value.casefold()))
+    return {
+        token
+        for match in TOKEN_PATTERN.findall(value.casefold())
+        if (token := match.strip(".-"))
+    }
 
 
 def build_searchable_text(evidence: CareerEvidence) -> str:
@@ -123,6 +131,46 @@ class InMemoryEvidenceRepository:
 
         return self._approved_records(user_id)[:limit]
 
+    def query_approved(
+        self,
+        *,
+        user_id: str,
+        query: str | None,
+        category: EvidenceCategory | None,
+        lifecycle_status: EvidenceLifecycleStatus,
+        offset: int,
+        limit: int,
+    ) -> EvidenceRegistryPage:
+        """Search, filter and page approved evidence deterministically."""
+
+        validate_page_bounds(
+            offset=offset,
+            limit=limit,
+        )
+
+        query_tokens = tokenise(query or "")
+        records = [
+            evidence
+            for evidence in self._managed_approved_records(user_id)
+            if evidence.lifecycle_status is lifecycle_status
+            and (category is None or evidence.category is category)
+            and (
+                not query_tokens
+                or query_tokens.issubset(tokenise(build_searchable_text(evidence)))
+            )
+        ]
+        records.sort(
+            key=lambda evidence: (
+                evidence.title.casefold(),
+                evidence.evidence_id,
+            )
+        )
+
+        return EvidenceRegistryPage(
+            items=records[offset : offset + limit],
+            total=len(records),
+        )
+
     def get_approved_for_management(
         self,
         *,
@@ -225,7 +273,32 @@ class InMemoryEvidenceRepository:
 
         return [
             evidence
-            for evidence in self._records_by_user.get(user_id, [])
-            if (evidence.verification_status is VerificationStatus.APPROVED)
-            and evidence.lifecycle_status is EvidenceLifecycleStatus.ACTIVE
+            for evidence in self._managed_approved_records(user_id)
+            if evidence.lifecycle_status is EvidenceLifecycleStatus.ACTIVE
         ]
+
+    def _managed_approved_records(
+        self,
+        user_id: str,
+    ) -> list[CareerEvidence]:
+        """Return active and archived approved evidence for one user."""
+
+        return [
+            evidence
+            for evidence in self._records_by_user.get(user_id, [])
+            if evidence.verification_status is VerificationStatus.APPROVED
+        ]
+
+
+def validate_page_bounds(
+    *,
+    offset: int,
+    limit: int,
+) -> None:
+    """Reject invalid repository pagination inputs."""
+
+    if offset < 0:
+        raise ValueError("Registry offset must not be negative.")
+
+    if limit < 1:
+        raise ValueError("Registry limit must be at least one.")

@@ -5,13 +5,17 @@ from careerops_agent_engine.application.exceptions import (
     CareerEvidenceUnavailableError,
 )
 from careerops_agent_engine.application.ports.evidence_repository import (
+    EvidenceRegistryPage,
     EvidenceRepository,
 )
 from careerops_agent_engine.application.services.cv_evidence_proposals import (
     contains_explicit_text,
     normalise_provenance_text,
 )
-from careerops_agent_engine.domain.enums import EvidenceLifecycleStatus
+from careerops_agent_engine.domain.enums import (
+    EvidenceCategory,
+    EvidenceLifecycleStatus,
+)
 from careerops_agent_engine.domain.models.evidence import (
     CareerEvidence,
     CareerEvidenceEdit,
@@ -39,6 +43,29 @@ class EvidenceRegistryService:
 
         return self._repository.list_approved(
             user_id=user_id,
+            limit=limit,
+        )
+
+    def query_approved(
+        self,
+        *,
+        user_id: str,
+        query: str | None = None,
+        category: EvidenceCategory | None = None,
+        lifecycle_status: EvidenceLifecycleStatus = EvidenceLifecycleStatus.ACTIVE,
+        offset: int = 0,
+        limit: int = 100,
+    ) -> EvidenceRegistryPage:
+        """Return a deterministic registry page for frontend browsing."""
+
+        normalised_query = query.strip() if query is not None else None
+
+        return self._repository.query_approved(
+            user_id=user_id,
+            query=normalised_query or None,
+            category=category,
+            lifecycle_status=lifecycle_status,
+            offset=offset,
             limit=limit,
         )
 

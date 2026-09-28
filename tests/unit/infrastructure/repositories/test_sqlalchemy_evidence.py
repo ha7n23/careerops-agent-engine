@@ -88,6 +88,15 @@ def repository() -> Iterator[SqlAlchemyEvidenceRepository]:
                     claims=["Used Kubernetes in production."],
                 ),
                 build_record(
+                    user_id="USER-001",
+                    evidence_id="EVD-PYTHON",
+                    title="Python Automation Skill",
+                    category=EvidenceCategory.SKILL,
+                    status=VerificationStatus.APPROVED,
+                    technologies=["Python"],
+                    claims=["Automated software workflows using Python."],
+                ),
+                build_record(
                     user_id="USER-002",
                     evidence_id="EVD-OTHER-K8S",
                     title="Kubernetes Deployment",
@@ -132,6 +141,36 @@ def test_search_excludes_rejected_and_cross_user_records(
     assert results == []
 
 
+def test_query_filters_searches_and_pages_approved_records(
+    repository: SqlAlchemyEvidenceRepository,
+) -> None:
+    """Persistent registry queries return stable pagination metadata."""
+
+    page = repository.query_approved(
+        user_id="USER-001",
+        query="python",
+        category=None,
+        lifecycle_status=EvidenceLifecycleStatus.ACTIVE,
+        offset=1,
+        limit=1,
+    )
+
+    assert [result.evidence_id for result in page.items] == ["EVD-PYTHON"]
+    assert page.total == 2
+
+    filtered = repository.query_approved(
+        user_id="USER-001",
+        query="automation python",
+        category=EvidenceCategory.SKILL,
+        lifecycle_status=EvidenceLifecycleStatus.ACTIVE,
+        offset=0,
+        limit=10,
+    )
+
+    assert [result.evidence_id for result in filtered.items] == ["EVD-PYTHON"]
+    assert filtered.total == 1
+
+
 def test_get_approved_enforces_user_boundary(
     repository: SqlAlchemyEvidenceRepository,
 ) -> None:
@@ -154,7 +193,10 @@ def test_list_returns_only_approved_user_evidence(
         user_id="USER-001",
     )
 
-    assert [result.evidence_id for result in results] == ["EVD-DOCKER"]
+    assert [result.evidence_id for result in results] == [
+        "EVD-DOCKER",
+        "EVD-PYTHON",
+    ]
 
 
 def test_archive_restore_and_edit_are_audited_and_idempotent(
@@ -175,7 +217,9 @@ def test_archive_restore_and_edit_are_audited_and_idempotent(
 
     assert archived is not None
     assert retry == archived
-    assert repository.list_approved(user_id="USER-001") == []
+    assert [
+        item.evidence_id for item in repository.list_approved(user_id="USER-001")
+    ] == ["EVD-PYTHON"]
     assert (
         repository.get_approved(
             user_id="USER-001",
@@ -190,6 +234,17 @@ def test_archive_restore_and_edit_are_audited_and_idempotent(
         )
         == archived
     )
+
+    archived_page = repository.query_approved(
+        user_id="USER-001",
+        query="docker",
+        category=EvidenceCategory.PROJECT,
+        lifecycle_status=EvidenceLifecycleStatus.ARCHIVED,
+        offset=0,
+        limit=10,
+    )
+    assert [item.evidence_id for item in archived_page.items] == ["EVD-DOCKER"]
+    assert archived_page.total == 1
 
     restored = repository.set_lifecycle_status(
         user_id="USER-001",

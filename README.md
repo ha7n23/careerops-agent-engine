@@ -102,8 +102,11 @@ System endpoints remain public for infrastructure health checks; business endpoi
 | `GET` | `/api/v1/cv-evidence-reviews` | List the authenticated user’s evidence-review history |
 | `GET` | `/api/v1/cv-evidence-reviews/{review_run_id}` | Recover a persisted evidence-review run |
 | `POST` | `/api/v1/cv-evidence-reviews/{review_run_id}/review` | Submit human evidence decisions |
-| `GET` | `/api/v1/evidence` | List the authenticated user’s approved Evidence Registry |
+| `GET` | `/api/v1/evidence` | Search, filter, and page the authenticated user’s approved Evidence Registry |
 | `GET` | `/api/v1/evidence/{evidence_id}` | Retrieve one approved evidence record |
+| `PATCH` | `/api/v1/evidence/{evidence_id}` | Edit grounded, user-managed evidence fields |
+| `POST` | `/api/v1/evidence/{evidence_id}/archive` | Recoverably remove evidence from active use |
+| `POST` | `/api/v1/evidence/{evidence_id}/restore` | Restore archived evidence to active use |
 | `POST` | `/api/v1/job-analysis` | Start durable job analysis |
 | `POST` | `/api/v1/job-analysis/{thread_id}/review` | Resume paused CV review |
 | `POST` | `/api/v1/cv-versions` | Generate/recover a verified final CV version |
@@ -114,6 +117,8 @@ System endpoints remain public for infrastructure health checks; business endpoi
 Both file upload and pasted-text submission return safe document metadata containing the `document_id`. The frontend uses that identifier with `POST /api/v1/cv-documents/{document_id}/evidence-review`; text-derived proposals retain `manual_entry` provenance and pass through the same duplicate detection and human-approval workflow as uploaded CV evidence.
 
 CV document and evidence-review history listings are user scoped, newest first, and bounded to 100 records. They expose lightweight metadata and counters without returning private storage keys, document hashes, owning user identifiers, or complete review payloads.
+
+Evidence Registry listing accepts an optional `q` search across titles, technologies, capabilities, and approved claims; optional `category` and `lifecycle_status` filters; and bounded `offset`/`limit` pagination. Search requires every normalized query token to be present somewhere in the searchable evidence fields. Results use stable title/identifier ordering and return `count`, `total`, `offset`, `limit`, and `has_more` metadata. The default remains the first 100 active approved records, while archived records are returned only when explicitly requested.
 
 Interactive OpenAPI documentation is available from FastAPI at `/docs` when the service is running.
 
@@ -225,6 +230,14 @@ See **[docs/architecture.md](docs/ARCHITECTURE.md)** for the graph topology, evi
 ## Project updates
 
 
+### 2026-09-28 — Evidence Registry discovery
+
+- Added user-scoped search across approved evidence titles, technologies, capabilities, and claims.
+- Added typed category and lifecycle filters, including explicit archived-evidence browsing.
+- Added stable offset pagination with total-count and `has_more` metadata for gateway and frontend integration.
+- Preserved the existing active-evidence default and introduced no LLM calls or schema migration.
+
+
 ### 2026-09-24 — Batched CV generation and verification
 
 - Reduced initial CV proposal generation from one quality-model call per eligible requirement to at most one batched call.
@@ -253,4 +266,4 @@ See **[docs/architecture.md](docs/ARCHITECTURE.md)** for the graph topology, evi
 - Added regression coverage for bounded evidence-discovery failure handling.
 - Successfully validated authenticated service-to-service job analysis from the separate CareerOps Automation & MCP Hub over the public HTTP API.
 
-Current quality baseline: **500 passed, 9 skipped**, Ruff clean, strict mypy clean across **154 source files**.
+Current quality baseline: **526 passed, 9 skipped**, Ruff clean, strict mypy clean across **154 source files**.
