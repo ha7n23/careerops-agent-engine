@@ -14,7 +14,7 @@ CareerOps Agent Engine is a portfolio-grade AI engineering project built around 
 - **Job-analysis graph:** extract requirements, use a bounded tool-calling agent to discover approved evidence, calculate a deterministic fit score, generate grounded CV proposals, verify factual claims, and pause for human review.
 - **Verified document output:** apply accepted changes to a structured CV, create an immutable version, render an ATS-friendly DOCX, convert it to PDF with LibreOffice, and deterministically verify both artifacts before download.
 - **Production-style engineering:** PostgreSQL persistence and LangGraph checkpoints, LangSmith tracing/evaluation with privacy masking, FastAPI security boundaries, Dockerised runtime, Alembic migrations, and GitHub Actions container integration.
-- **Current quality baseline:** **500 passing tests**, **9 opt-in live integration tests skipped by default**, Ruff clean, and strict mypy checks across **154 source files**.
+- **Current quality baseline:** **527 passing tests**, **9 opt-in live integration tests skipped by default**, Ruff clean, and strict mypy checks across **154 source files**.
 
 > For the deeper design, trust boundaries, workflow states, persistence model, and trade-offs, see [Architecture](docs/ARCHITECTURE.md).
 
@@ -108,6 +108,7 @@ System endpoints remain public for infrastructure health checks; business endpoi
 | `POST` | `/api/v1/evidence/{evidence_id}/archive` | Recoverably remove evidence from active use |
 | `POST` | `/api/v1/evidence/{evidence_id}/restore` | Restore archived evidence to active use |
 | `POST` | `/api/v1/job-analysis` | Start durable job analysis |
+| `GET` | `/api/v1/job-analysis/{thread_id}` | Recover a durable job-analysis run |
 | `POST` | `/api/v1/job-analysis/{thread_id}/review` | Resume paused CV review |
 | `POST` | `/api/v1/cv-versions` | Generate/recover a verified final CV version |
 | `GET` | `/api/v1/cv-versions/{cv_version_id}` | Read safe CV-version metadata |
@@ -121,6 +122,7 @@ CV document and evidence-review history listings are user scoped, newest first, 
 Evidence Registry listing accepts an optional `q` search across titles, technologies, capabilities, and approved claims; optional `category` and `lifecycle_status` filters; and bounded `offset`/`limit` pagination. Search requires every normalized query token to be present somewhere in the searchable evidence fields. Results use stable title/identifier ordering and return `count`, `total`, `offset`, `limit`, and `has_more` metadata. The default remains the first 100 active approved records, while archived records are returned only when explicitly requested.
 
 Interactive OpenAPI documentation is available from FastAPI at `/docs` when the service is running.
+The integration contract frozen for the Automation/MCP Hub and frontend is documented in [Module 1 API Contract](docs/MODULE_1_API_CONTRACT.md).
 
 ## Quick start
 
@@ -163,6 +165,14 @@ The default Groq routing uses `openai/gpt-oss-20b` for fast structured extractio
 For Groq fast structured extraction, temporary rate-limit or internal-server failures can trigger one model transition from the configured fast model to the quality model after the primary model’s configured retries are exhausted. Authentication, invalid-request, connection, timeout, validation, and grounding failures are not fallback conditions. Quality-generation and tool-calling paths do not downgrade or switch providers.
 
 Live LLM-provider and LibreOffice integration tests are opt-in through `RUN_LIVE_LLM_TESTS=true` and `RUN_LIVE_DOCUMENT_TESTS=true` so the default suite stays deterministic and CI-friendly.
+
+For local Git Bash live tests, export values from `.env` into the current shell first:
+
+```bash
+set -a
+source .env
+set +a
+```
 
 
 ### Practical CV processing limits
@@ -229,6 +239,12 @@ See **[docs/architecture.md](docs/ARCHITECTURE.md)** for the graph topology, evi
 
 ## Project updates
 
+### 2026-09-28 — Module 1 contract freeze
+
+- Added one deterministic integration proof spanning text ingestion, proposals, duplicate resolution, approval, evidence lifecycle, registry queries, cross-user isolation, and job analysis.
+- Revalidated the single Alembic head, real PostgreSQL upgrade, container health/readiness, and non-root runtime.
+- Live-proved the Groq job-analysis safety boundary and the HTTP DOCX/PDF pipeline.
+- Froze the authenticated `/api/v1` integration contract for the Automation/MCP Hub and frontend.
 
 ### 2026-09-28 — Evidence Registry discovery
 
@@ -266,4 +282,4 @@ See **[docs/architecture.md](docs/ARCHITECTURE.md)** for the graph topology, evi
 - Added regression coverage for bounded evidence-discovery failure handling.
 - Successfully validated authenticated service-to-service job analysis from the separate CareerOps Automation & MCP Hub over the public HTTP API.
 
-Current quality baseline: **526 passed, 9 skipped**, Ruff clean, strict mypy clean across **154 source files**.
+Current quality baseline: **527 passed, 9 skipped**, Ruff clean, strict mypy clean across **154 source files**.

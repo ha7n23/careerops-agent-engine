@@ -213,6 +213,8 @@ Before running evidence discovery for a requirement set, the runner performs one
 
 The approved Evidence Registry is exposed through an authenticated management API for downstream gateways and frontends. Listing remains user scoped and defaults to active evidence. Optional category and lifecycle filters compose with deterministic all-token search across titles, technologies, capabilities, and approved claims. Stable title/identifier ordering plus bounded offset/limit pagination returns a total count and `has_more` signal without exposing ownership metadata. Archived evidence appears only when explicitly requested; pending or rejected evidence is never exposed through this interface. Individual retrieval and mutations use the same opaque `404` response for unknown and cross-user identifiers.
 
+Evidence lifecycle changes are recoverable and auditable. Safe user-managed fields can be edited only when newly introduced technologies and claims remain grounded in trusted source excerpts. Archive and restore operations are idempotent and append before/after history records. Archived evidence stays available to the management API but is excluded from normal search, evidence discovery, fit scoring, and job analysis; restoration makes it immediately eligible again. Duplicate findings also require an explicit per-finding human action: keep the existing item, accept a separate record, or—when matching approved evidence—replace or merge into the existing record.
+
 The frontend recovery boundary also exposes bounded, newest-first histories for uploaded CV documents and evidence-review runs. Dedicated summary projections return only presentation-safe metadata, lifecycle status, timestamps, and proposal/approval counts. Queries remain user scoped and do not load document contents, private storage locations, hashes, or complete review payloads.
 
 ## 6. Requirement extraction and deterministic fit scoring
@@ -335,6 +337,7 @@ The business schema is managed with Alembic and SQLAlchemy.
 | `cv_evidence_review_runs` | Latest evidence-review snapshot |
 | `cv_evidence_review_history` | Append-only evidence-review decisions/results |
 | `career_evidence` | Human-approved trusted career evidence |
+| `career_evidence_history` | Append-only before/after evidence edit, archive, and restore history |
 | `job_analysis_runs` | Latest durable job-analysis business snapshot |
 | `cv_review_history` | Append-only CV review decisions/results |
 | `cv_versions` | Immutable structured CV versions and provenance |
@@ -399,6 +402,7 @@ This is intentionally preserved as a failure-driven evaluation story rather than
 ## 13. API and security boundary
 
 FastAPI exposes the engine through explicit Pydantic request/response contracts.
+The frozen Module 1 integration boundary is documented in [Module 1 API Contract](MODULE_1_API_CONTRACT.md); generated OpenAPI remains the canonical field-level schema.
 
 ### Authentication model
 
@@ -461,7 +465,7 @@ Cloud deployment is deliberately deferred. The project proves deployment readine
 
 ## 15. Testing strategy
 
-The current verified baseline is **500 passed, 9 skipped**.
+The current verified baseline is **527 passed, 9 skipped**.
 
 The suite covers:
 
