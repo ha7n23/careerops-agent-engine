@@ -3,7 +3,12 @@
 import pytest
 from pydantic import ValidationError
 
+from careerops_agent_engine.domain.enums import (
+    EvidenceDuplicateResolutionAction,
+    EvidenceOverlapScope,
+)
 from careerops_agent_engine.domain.models.evidence_review import (
+    EvidenceDuplicateResolution,
     EvidenceProposalEdit,
     EvidenceReviewDecision,
 )
@@ -58,3 +63,18 @@ def test_mixed_review_decision_is_valid() -> None:
 
     assert decision.approved_proposal_ids == ["EVP-001"]
     assert decision.edits[0].proposal_id == ("EVP-002")
+
+
+def test_within_document_overlap_rejects_existing_evidence_mutation() -> None:
+    """A pending proposal cannot be used as a replace or merge target."""
+
+    with pytest.raises(
+        ValidationError,
+        match="supports only keep-existing or accept-separate",
+    ):
+        EvidenceDuplicateResolution(
+            proposal_id="EVP-002",
+            scope=EvidenceOverlapScope.WITHIN_DOCUMENT,
+            matching_proposal_id="EVP-001",
+            action=EvidenceDuplicateResolutionAction.MERGE_INTO_EXISTING,
+        )

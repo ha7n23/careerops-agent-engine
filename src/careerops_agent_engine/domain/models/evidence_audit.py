@@ -155,12 +155,9 @@ class CVEvidenceReviewAuditEntry(DomainModel):
                 "Evidence audit edit result must match the human decision."
             )
 
-        if (
-            self.result.acknowledged_overlap_proposal_ids
-            != self.decision.acknowledged_overlap_proposal_ids
-        ):
+        if self.result.duplicate_resolutions != self.decision.duplicate_resolutions:
             raise ValueError(
-                "Evidence audit overlap acknowledgements must match the human decision."
+                "Evidence audit duplicate resolutions must match the human decision."
             )
 
         return self

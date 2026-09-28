@@ -191,6 +191,7 @@ class CVEvidenceWorkflowService:
             )
 
         result = self._review_service.review(
+            user_id=user_id,
             proposals=snapshot.proposals,
             overlap_findings=(snapshot.overlap_findings),
             decision=decision,

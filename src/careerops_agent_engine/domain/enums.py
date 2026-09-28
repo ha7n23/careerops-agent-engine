@@ -127,6 +127,15 @@ class EvidenceOverlapScope(StrEnum):
     APPROVED_EVIDENCE = "approved_evidence"
 
 
+class EvidenceDuplicateResolutionAction(StrEnum):
+    """Explicit human action for a deterministic evidence overlap."""
+
+    KEEP_EXISTING = "keep_existing"
+    ACCEPT_SEPARATE = "accept_separate"
+    REPLACE_EXISTING = "replace_existing"
+    MERGE_INTO_EXISTING = "merge_into_existing"
+
+
 class CVEvidenceReviewRunStatus(StrEnum):
     """Business lifecycle status of one CV evidence-review run."""
 
