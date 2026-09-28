@@ -9,6 +9,8 @@ from careerops_agent_engine.application.ports.cv_evidence_audit_repository impor
 )
 from careerops_agent_engine.domain.enums import (
     CVEvidenceReviewRunStatus,
+    EvidenceLifecycleStatus,
+    EvidenceMutationAction,
     VerificationStatus,
 )
 from careerops_agent_engine.domain.models.evidence import (
@@ -34,6 +36,8 @@ from careerops_agent_engine.infrastructure.database.models.evidence import (
     CareerEvidenceRecord,
 )
 from careerops_agent_engine.infrastructure.repositories.sqlalchemy_evidence import (
+    add_history_entry,
+    load_managed_record_for_update,
     record_to_domain,
 )
 
@@ -126,6 +130,14 @@ class SqlAlchemyCVEvidenceAuditRepository(
                     session=session,
                     user_id=snapshot.user_id,
                     evidence=evidence,
+                )
+
+            for update in review.result.evidence_updates:
+                update_approved_evidence(
+                    session=session,
+                    user_id=snapshot.user_id,
+                    expected=update.before,
+                    evidence=update.after,
                 )
 
             session.add(
@@ -379,6 +391,62 @@ def insert_approved_evidence(
     )
 
 
+def update_approved_evidence(
+    *,
+    session: Session,
+    user_id: str,
+    expected: CareerEvidence,
+    evidence: CareerEvidence,
+) -> None:
+    """Update one active user-owned item and append registry history."""
+
+    if (
+        evidence.verification_status is not VerificationStatus.APPROVED
+        or evidence.lifecycle_status is not EvidenceLifecycleStatus.ACTIVE
+    ):
+        raise ValueError(
+            "Duplicate resolution may update only active approved evidence."
+        )
+
+    record = load_managed_record_for_update(
+        session=session,
+        user_id=user_id,
+        evidence_id=evidence.evidence_id,
+    )
+
+    if record is None or (
+        record.lifecycle_status != EvidenceLifecycleStatus.ACTIVE.value
+    ):
+        raise ValueError("Duplicate resolution target is unavailable for this user.")
+
+    before = record_to_domain(record)
+
+    if before != expected:
+        raise ValueError("Duplicate resolution target changed after overlap review.")
+
+    record.category = evidence.category.value
+    record.title = evidence.title
+    record.technologies = list(evidence.technologies)
+    record.capabilities = list(evidence.capabilities)
+    record.approved_claims = list(evidence.approved_claims)
+    record.source_references = [
+        reference.model_dump(mode="json") for reference in evidence.source_references
+    ]
+    after = record_to_domain(record)
+
+    if after == before:
+        return
+
+    add_history_entry(
+        session=session,
+        user_id=user_id,
+        evidence_id=evidence.evidence_id,
+        action=EvidenceMutationAction.EDIT,
+        before=before,
+        after=after,
+    )
+
+
 def review_run_record_to_domain(
     record: CVEvidenceReviewRunRecord,
 ) -> CVEvidenceReviewRunSnapshot:
@@ -423,7 +491,9 @@ def review_run_record_to_summary(
         status=CVEvidenceReviewRunStatus(record.status),
         proposal_count=len(record.proposals),
         approved_evidence_count=(
-            len(review_result.approved_evidence) if review_result is not None else 0
+            len(review_result.approved_evidence) + len(review_result.evidence_updates)
+            if review_result is not None
+            else 0
         ),
         created_at=record.created_at,
         updated_at=record.updated_at,
@@ -482,6 +552,20 @@ def validate_idempotent_review_retry(
         if record is None or record_to_domain(record) != evidence:
             raise ValueError(
                 "Retry evidence does not match the persisted approved evidence."
+            )
+
+    for update in review.result.evidence_updates:
+        record = session.get(
+            CareerEvidenceRecord,
+            (
+                snapshot.user_id,
+                update.after.evidence_id,
+            ),
+        )
+
+        if record is None or record_to_domain(record) != update.after:
+            raise ValueError(
+                "Retry evidence does not match the persisted updated evidence."
             )
 
 

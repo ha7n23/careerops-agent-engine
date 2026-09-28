@@ -12,6 +12,8 @@ from careerops_agent_engine.domain.enums import (
     CVEvidenceReviewRunStatus,
     CVSection,
     EvidenceCategory,
+    EvidenceDuplicateResolutionAction,
+    EvidenceOverlapScope,
     EvidenceSourceType,
     VerificationStatus,
 )
@@ -20,6 +22,7 @@ from careerops_agent_engine.domain.models.document import (
 )
 from careerops_agent_engine.domain.models.evidence import (
     CareerEvidence,
+    CareerEvidenceOverlapFinding,
     CareerEvidenceProposal,
     SourceReference,
 )
@@ -28,6 +31,8 @@ from careerops_agent_engine.domain.models.evidence_audit import (
     CVEvidenceReviewRunSnapshot,
 )
 from careerops_agent_engine.domain.models.evidence_review import (
+    EvidenceDuplicateResolution,
+    EvidenceDuplicateUpdate,
     EvidenceReviewDecision,
     EvidenceReviewResult,
 )
@@ -332,6 +337,105 @@ def test_identical_review_retry_is_idempotent(
         )
         == 1
     )
+
+
+def test_duplicate_update_is_atomic_audited_and_idempotent(
+    repositories: tuple[
+        SqlAlchemyCVEvidenceAuditRepository,
+        SqlAlchemyCareerDocumentRepository,
+        SqlAlchemyEvidenceRepository,
+    ],
+) -> None:
+    """A merge/replace result updates in place with durable before/after audit."""
+
+    audit_repository, _, evidence_repository = repositories
+    audit_repository.save_review_result(
+        snapshot=build_completed_snapshot(),
+        review=build_review(),
+    )
+
+    before = build_approved_evidence()
+    after = before.model_copy(
+        update={
+            "title": "Updated CareerOps",
+            "approved_claims": [
+                "Built CareerOps using Python and FastAPI.",
+                "Added deterministic evidence resolution.",
+            ],
+        }
+    )
+    resolution = EvidenceDuplicateResolution(
+        proposal_id="EVP-001",
+        scope=EvidenceOverlapScope.APPROVED_EVIDENCE,
+        matching_evidence_id="EVD-001",
+        action=EvidenceDuplicateResolutionAction.MERGE_INTO_EXISTING,
+    )
+    result = EvidenceReviewResult(
+        approved_proposal_ids=["EVP-001"],
+        duplicate_resolutions=[resolution],
+        evidence_updates=[
+            EvidenceDuplicateUpdate(
+                proposal_id="EVP-001",
+                action=EvidenceDuplicateResolutionAction.MERGE_INTO_EXISTING,
+                before=before,
+                after=after,
+            )
+        ],
+    )
+    snapshot = CVEvidenceReviewRunSnapshot(
+        review_run_id="EVR-001",
+        user_id="USER-001",
+        document_id="DOC-001",
+        status=CVEvidenceReviewRunStatus.COMPLETED,
+        proposals=[build_proposal()],
+        overlap_findings=[
+            CareerEvidenceOverlapFinding(
+                proposal_id="EVP-001",
+                scope=EvidenceOverlapScope.APPROVED_EVIDENCE,
+                matching_evidence_id="EVD-001",
+                matched_claims=["Built CareerOps using Python and FastAPI."],
+            )
+        ],
+        review_result=result,
+    )
+    review = CVEvidenceReviewAuditEntry(
+        review_id="EVR-AUDIT-002",
+        review_run_id="EVR-001",
+        sequence_number=2,
+        decision=EvidenceReviewDecision(
+            approved_proposal_ids=["EVP-001"],
+            duplicate_resolutions=[resolution],
+        ),
+        result=result,
+    )
+
+    audit_repository.save_review_result(snapshot=snapshot, review=review)
+    audit_repository.save_review_result(snapshot=snapshot, review=review)
+
+    assert (
+        evidence_repository.get_approved(
+            user_id="USER-001",
+            evidence_id="EVD-001",
+        )
+        == after
+    )
+    assert (
+        audit_repository.get_run(
+            user_id="USER-001",
+            review_run_id="EVR-001",
+        )
+        == snapshot
+    )
+    reviews = audit_repository.list_reviews(
+        user_id="USER-001",
+        review_run_id="EVR-001",
+    )
+    assert [item.review_id for item in reviews] == [
+        "EVR-AUDIT-001",
+        "EVR-AUDIT-002",
+    ]
+    assert reviews[-1].result.evidence_updates[0].before == before
+    assert reviews[-1].result.evidence_updates[0].after == after
 
 
 def test_duplicate_sequence_rolls_back_snapshot_update(

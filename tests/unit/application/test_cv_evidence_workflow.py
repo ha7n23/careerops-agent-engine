@@ -28,7 +28,9 @@ from careerops_agent_engine.domain.enums import (
     CareerDocumentStatus,
     CVEvidenceReviewRunStatus,
     EvidenceCategory,
+    EvidenceDuplicateResolutionAction,
     EvidenceOverlapScope,
+    EvidenceSourceType,
     VerificationStatus,
 )
 from careerops_agent_engine.domain.models.document import (
@@ -37,14 +39,17 @@ from careerops_agent_engine.domain.models.document import (
     ParsedCVDocument,
 )
 from careerops_agent_engine.domain.models.evidence import (
+    CareerEvidence,
     CareerEvidenceCandidate,
     CareerEvidenceOverlapFinding,
+    SourceReference,
 )
 from careerops_agent_engine.domain.models.evidence_audit import (
     CVEvidenceReviewAuditEntry,
     CVEvidenceReviewRunSnapshot,
 )
 from careerops_agent_engine.domain.models.evidence_review import (
+    EvidenceDuplicateResolution,
     EvidenceReviewDecision,
 )
 from careerops_agent_engine.infrastructure.documents.cv_section_parser import (
@@ -410,15 +415,38 @@ def build_workflow(
 
     proposal_service = CVEvidenceProposalService(extractor=candidate_extractor)
 
+    evidence_repository = InMemoryEvidenceRepository(
+        {
+            "USER-001": [
+                CareerEvidence(
+                    evidence_id="EVD-EXISTING",
+                    category=EvidenceCategory.PROJECT,
+                    title="Existing unrelated evidence",
+                    verification_status=VerificationStatus.APPROVED,
+                    technologies=[],
+                    capabilities=[],
+                    approved_claims=["Maintained a legacy service."],
+                    source_references=[
+                        SourceReference(
+                            source_type=EvidenceSourceType.UPLOADED_CV,
+                            source_id="DOC-OLD",
+                            source_excerpt="Maintained a legacy service.",
+                        )
+                    ],
+                )
+            ]
+        }
+    )
+
     workflow = CVEvidenceWorkflowService(
         document_repository=document_repository,
         audit_repository=audit_repository,
         preparation_service=preparation_service,
         proposal_service=proposal_service,
         duplicate_detector=(
-            CVEvidenceDuplicateDetector(repository=(InMemoryEvidenceRepository()))
+            CVEvidenceDuplicateDetector(repository=evidence_repository)
         ),
-        review_service=(CVEvidenceReviewService()),
+        review_service=(CVEvidenceReviewService(repository=evidence_repository)),
     )
 
     return (
@@ -571,7 +599,14 @@ def test_submit_review_uses_persisted_proposals_and_findings() -> None:
 
     decision = EvidenceReviewDecision(
         approved_proposal_ids=[proposal.proposal_id],
-        acknowledged_overlap_proposal_ids=[proposal.proposal_id],
+        duplicate_resolutions=[
+            EvidenceDuplicateResolution(
+                proposal_id=proposal.proposal_id,
+                scope=EvidenceOverlapScope.APPROVED_EVIDENCE,
+                matching_evidence_id="EVD-EXISTING",
+                action=EvidenceDuplicateResolutionAction.ACCEPT_SEPARATE,
+            )
+        ],
         reviewer_comment=("Reviewed and accepted overlap."),
     )
 

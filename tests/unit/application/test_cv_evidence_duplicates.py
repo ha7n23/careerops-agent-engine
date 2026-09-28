@@ -9,6 +9,7 @@ from careerops_agent_engine.application.services.cv_evidence_duplicates import (
 from careerops_agent_engine.domain.enums import (
     CVSection,
     EvidenceCategory,
+    EvidenceDuplicateResolutionAction,
     EvidenceOverlapScope,
     EvidenceSourceType,
     VerificationStatus,
@@ -114,6 +115,10 @@ def test_normalised_claim_overlap_is_detected_within_document() -> None:
     assert finding.proposal_id == "EVP-002"
     assert finding.matching_proposal_id == "EVP-001"
     assert finding.matched_claims == ["BUILT Python APIs using FastAPI"]
+    assert finding.allowed_actions == [
+        EvidenceDuplicateResolutionAction.KEEP_EXISTING,
+        EvidenceDuplicateResolutionAction.ACCEPT_SEPARATE,
+    ]
 
 
 def test_same_source_excerpt_is_detected_within_document() -> None:
@@ -182,6 +187,7 @@ def test_overlap_with_approved_evidence_is_detected() -> None:
     assert finding.scope is EvidenceOverlapScope.APPROVED_EVIDENCE
 
     assert finding.matching_evidence_id == "EVD-001"
+    assert finding.allowed_actions == list(EvidenceDuplicateResolutionAction)
 
 
 def test_rejected_and_cross_user_evidence_are_not_compared() -> None:

@@ -275,7 +275,7 @@ def get_cv_evidence_workflow_service() -> CVEvidenceWorkflowService:
             extractor=create_cv_evidence_extractor()
         ),
         duplicate_detector=CVEvidenceDuplicateDetector(repository=evidence_repository),
-        review_service=CVEvidenceReviewService(),
+        review_service=CVEvidenceReviewService(repository=evidence_repository),
     )
 
 

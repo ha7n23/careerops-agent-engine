@@ -1,0 +1,1502 @@
+diff --git a/src/careerops_agent_engine/api/dependencies.py b/src/careerops_agent_engine/api/dependencies.py
+index 93bf08f40a06bd13295c3bccf9323384729b2224..2b3f091c8cf3caf3e908affd6c269cf59444e6c1 100644
+--- a/src/careerops_agent_engine/api/dependencies.py
++++ b/src/careerops_agent_engine/api/dependencies.py
+@@ -275,7 +275,7 @@ def get_cv_evidence_workflow_service() -> CVEvidenceWorkflowService:
+             extractor=create_cv_evidence_extractor()
+         ),
+         duplicate_detector=CVEvidenceDuplicateDetector(repository=evidence_repository),
+-        review_service=CVEvidenceReviewService(),
++        review_service=CVEvidenceReviewService(repository=evidence_repository),
+     )
+ 
+ 
+diff --git a/src/careerops_agent_engine/application/services/cv_evidence_review.py b/src/careerops_agent_engine/application/services/cv_evidence_review.py
+index 87ba0468a54062f2ad33aa6efe8e6187da0283e1..5754a575cf2569561dc813748833f53275480b7a 100644
+--- a/src/careerops_agent_engine/application/services/cv_evidence_review.py
++++ b/src/careerops_agent_engine/application/services/cv_evidence_review.py
+@@ -6,12 +6,17 @@ from careerops_agent_engine.application.exceptions import (
+     CVEvidenceProposalValidationError,
+     CVEvidenceReviewValidationError,
+ )
++from careerops_agent_engine.application.ports.evidence_repository import (
++    EvidenceRepository,
++)
+ from careerops_agent_engine.application.services.cv_evidence_proposals import (
+     validate_claim_grounding,
+     validate_string_list,
+     validate_technology_grounding,
+ )
+ from careerops_agent_engine.domain.enums import (
++    EvidenceDuplicateResolutionAction,
++    EvidenceOverlapScope,
+     VerificationStatus,
+ )
+ from careerops_agent_engine.domain.models.evidence import (
+@@ -19,8 +24,11 @@ from careerops_agent_engine.domain.models.evidence import (
+     CareerEvidenceCandidate,
+     CareerEvidenceOverlapFinding,
+     CareerEvidenceProposal,
++    SourceReference,
+ )
+ from careerops_agent_engine.domain.models.evidence_review import (
++    EvidenceDuplicateResolution,
++    EvidenceDuplicateUpdate,
+     EvidenceProposalEdit,
+     EvidenceReviewDecision,
+     EvidenceReviewResult,
+@@ -30,9 +38,15 @@ from careerops_agent_engine.domain.models.evidence_review import (
+ class CVEvidenceReviewService:
+     """Convert explicitly accepted proposals into approved evidence."""
+ 
++    def __init__(self, repository: EvidenceRepository | None = None) -> None:
++        """Store the evidence reader used to validate user-owned targets."""
++
++        self._repository = repository
++
+     def review(
+         self,
+         *,
++        user_id: str | None = None,
+         proposals: list[CareerEvidenceProposal],
+         overlap_findings: list[CareerEvidenceOverlapFinding],
+         decision: EvidenceReviewDecision,
+@@ -46,44 +60,107 @@ class CVEvidenceReviewService:
+             decision=decision,
+         )
+ 
+-        validate_overlap_acknowledgements(
++        resolutions_by_proposal = validate_duplicate_resolutions(
+             proposals_by_id=proposals_by_id,
+             overlap_findings=overlap_findings,
+             decision=decision,
+         )
+ 
+         approved_evidence: list[CareerEvidence] = []
++        evidence_updates: list[EvidenceDuplicateUpdate] = []
+ 
+-        for proposal_id in decision.approved_proposal_ids:
+-            proposal = proposals_by_id[proposal_id]
++        edits_by_id = {edit.proposal_id: edit for edit in decision.edits}
+ 
+-            approved_evidence.append(
+-                approve_proposal(
+-                    proposal=proposal,
+-                    edit=None,
+-                )
++        for proposal_id in [
++            *decision.approved_proposal_ids,
++            *edits_by_id,
++        ]:
++            proposal = proposals_by_id[proposal_id]
++            accepted = approve_proposal(
++                proposal=proposal,
++                edit=edits_by_id.get(proposal_id),
+             )
++            resolutions = resolutions_by_proposal.get(proposal_id, [])
++            mutation = next(
++                (
++                    resolution
++                    for resolution in resolutions
++                    if resolution.action
++                    in {
++                        EvidenceDuplicateResolutionAction.REPLACE_EXISTING,
++                        EvidenceDuplicateResolutionAction.MERGE_INTO_EXISTING,
++                    }
++                ),
++                None,
++            )
++
++            if mutation is None:
++                approved_evidence.append(accepted)
++                continue
+ 
+-        for edit in decision.edits:
+-            proposal = proposals_by_id[edit.proposal_id]
++            existing = self._get_resolution_target(
++                user_id=user_id,
++                resolution=mutation,
++            )
+ 
+-            approved_evidence.append(
+-                approve_proposal(
+-                    proposal=proposal,
+-                    edit=edit,
++            updated = (
++                replace_existing_evidence(existing=existing, accepted=accepted)
++                if mutation.action is EvidenceDuplicateResolutionAction.REPLACE_EXISTING
++                else merge_evidence(existing=existing, accepted=accepted)
++            )
++            evidence_updates.append(
++                EvidenceDuplicateUpdate(
++                    proposal_id=proposal_id,
++                    action=mutation.action,
++                    before=existing,
++                    after=updated,
+                 )
+             )
+ 
++        validate_approved_targets(
++            repository=self._repository,
++            user_id=user_id,
++            overlap_findings=overlap_findings,
++        )
++
+         return EvidenceReviewResult(
+             approved_proposal_ids=list(decision.approved_proposal_ids),
+             edited_proposal_ids=[edit.proposal_id for edit in decision.edits],
+             rejected_proposal_ids=list(decision.rejected_proposal_ids),
+-            acknowledged_overlap_proposal_ids=list(
+-                decision.acknowledged_overlap_proposal_ids
+-            ),
++            duplicate_resolutions=list(decision.duplicate_resolutions),
+             approved_evidence=approved_evidence,
++            evidence_updates=evidence_updates,
++        )
++
++    def _get_resolution_target(
++        self,
++        *,
++        user_id: str | None,
++        resolution: EvidenceDuplicateResolution,
++    ) -> CareerEvidence:
++        """Load one active approved mutation target inside its owner boundary."""
++
++        if (
++            self._repository is None
++            or user_id is None
++            or resolution.matching_evidence_id is None
++        ):
++            raise CVEvidenceReviewValidationError(
++                "Duplicate resolution requires a user-scoped evidence repository."
++            )
++
++        existing = self._repository.get_approved(
++            user_id=user_id,
++            evidence_id=resolution.matching_evidence_id,
+         )
+ 
++        if existing is None:
++            raise CVEvidenceReviewValidationError(
++                "Duplicate resolution target is unavailable for this user."
++            )
++
++        return existing
++
+ 
+ def build_proposal_index(
+     proposals: list[CareerEvidenceProposal],
+@@ -148,7 +225,7 @@ def validate_review_coverage(
+         )
+ 
+ 
+-def validate_overlap_acknowledgements(
++def validate_duplicate_resolutions(
+     *,
+     proposals_by_id: dict[
+         str,
+@@ -156,8 +233,8 @@ def validate_overlap_acknowledgements(
+     ],
+     overlap_findings: list[CareerEvidenceOverlapFinding],
+     decision: EvidenceReviewDecision,
+-) -> None:
+-    """Require explicit acknowledgement before accepting overlaps."""
++) -> dict[str, list[EvidenceDuplicateResolution]]:
++    """Require one valid, outcome-consistent action for every overlap."""
+ 
+     expected_ids = set(proposals_by_id)
+ 
+@@ -171,13 +248,16 @@ def validate_overlap_acknowledgements(
+             "proposals outside the current review set."
+         )
+ 
+-    acknowledged_ids = set(decision.acknowledged_overlap_proposal_ids)
+-
+-    unknown_acknowledgements = acknowledged_ids - finding_proposal_ids
++    matching_proposal_ids = {
++        finding.matching_proposal_id
++        for finding in overlap_findings
++        if finding.scope is EvidenceOverlapScope.WITHIN_DOCUMENT
++    }
+ 
+-    if unknown_acknowledgements:
++    if matching_proposal_ids - expected_ids:
+         raise CVEvidenceReviewValidationError(
+-            "Overlap acknowledgement references a proposal without an overlap finding."
++            "Evidence overlap findings reference a matching proposal outside "
++            "the current review set."
+         )
+ 
+     accepted_ids = {
+@@ -185,19 +265,162 @@ def validate_overlap_acknowledgements(
+         *(edit.proposal_id for edit in decision.edits),
+     }
+ 
+-    required_acknowledgements = finding_proposal_ids & accepted_ids
++    finding_keys = {overlap_key(finding) for finding in overlap_findings}
++    resolution_keys = {
++        overlap_key(resolution) for resolution in decision.duplicate_resolutions
++    }
+ 
+-    missing_acknowledgements = required_acknowledgements - acknowledged_ids
++    if resolution_keys - finding_keys:
++        raise CVEvidenceReviewValidationError(
++            "Duplicate resolution references an overlap outside the current review."
++        )
+ 
+-    if missing_acknowledgements:
+-        missing_display = ", ".join(sorted(missing_acknowledgements))
++    if len(finding_keys) != len(overlap_findings):
++        raise CVEvidenceReviewValidationError(
++            "Evidence review contains duplicate overlap findings."
++        )
+ 
++    if finding_keys - resolution_keys:
+         raise CVEvidenceReviewValidationError(
+-            "Accepting overlapping evidence requires "
+-            "explicit human acknowledgement: "
+-            f"{missing_display}"
++            "Every evidence overlap requires an explicit duplicate resolution."
++        )
++
++    resolutions_by_proposal: dict[str, list[EvidenceDuplicateResolution]] = {}
++
++    for resolution in decision.duplicate_resolutions:
++        resolutions_by_proposal.setdefault(
++            resolution.proposal_id,
++            [],
++        ).append(resolution)
++
++    for proposal_id in finding_proposal_ids:
++        resolutions = resolutions_by_proposal[proposal_id]
++        actions = [resolution.action for resolution in resolutions]
++        is_accepted = proposal_id in accepted_ids
++
++        if not is_accepted:
++            if any(
++                action is not EvidenceDuplicateResolutionAction.KEEP_EXISTING
++                for action in actions
++            ):
++                raise CVEvidenceReviewValidationError(
++                    "A rejected duplicate proposal must keep the existing evidence."
++                )
++
++            for resolution in resolutions:
++                if (
++                    resolution.scope is EvidenceOverlapScope.WITHIN_DOCUMENT
++                    and resolution.matching_proposal_id not in accepted_ids
++                ):
++                    raise CVEvidenceReviewValidationError(
++                        "Keeping a pending duplicate requires accepting its "
++                        "matching proposal."
++                    )
++
++            continue
++
++        if any(
++            resolution.scope is EvidenceOverlapScope.WITHIN_DOCUMENT
++            and resolution.action is EvidenceDuplicateResolutionAction.KEEP_EXISTING
++            for resolution in resolutions
++        ):
++            raise CVEvidenceReviewValidationError(
++                "An accepted proposal cannot defer to a matching pending proposal."
++            )
++
++        mutations = [
++            action
++            for action in actions
++            if action
++            in {
++                EvidenceDuplicateResolutionAction.REPLACE_EXISTING,
++                EvidenceDuplicateResolutionAction.MERGE_INTO_EXISTING,
++            }
++        ]
++        accepts_separate = EvidenceDuplicateResolutionAction.ACCEPT_SEPARATE in actions
++
++        if accepts_separate and mutations:
++            raise CVEvidenceReviewValidationError(
++                "A duplicate proposal cannot be accepted separately and mutate "
++                "existing evidence."
++            )
++
++        if len(mutations) > 1:
++            raise CVEvidenceReviewValidationError(
++                "A duplicate proposal may update only one existing evidence record."
++            )
++
++        if not accepts_separate and not mutations:
++            raise CVEvidenceReviewValidationError(
++                "An accepted overlap requires accept-separate, replace, or merge."
++            )
++
++    mutation_target_ids = [
++        resolution.matching_evidence_id
++        for resolution in decision.duplicate_resolutions
++        if resolution.action
++        in {
++            EvidenceDuplicateResolutionAction.REPLACE_EXISTING,
++            EvidenceDuplicateResolutionAction.MERGE_INTO_EXISTING,
++        }
++    ]
++
++    if len(mutation_target_ids) != len(set(mutation_target_ids)):
++        raise CVEvidenceReviewValidationError(
++            "One review may update each existing evidence record only once."
+         )
+ 
++    return resolutions_by_proposal
++
++
++def overlap_key(
++    finding: CareerEvidenceOverlapFinding | EvidenceDuplicateResolution,
++) -> tuple[str, EvidenceOverlapScope, str | None, str | None]:
++    """Build the stable identity shared by a finding and its resolution."""
++
++    return (
++        finding.proposal_id,
++        finding.scope,
++        finding.matching_proposal_id,
++        finding.matching_evidence_id,
++    )
++
++
++def validate_approved_targets(
++    *,
++    repository: EvidenceRepository | None,
++    user_id: str | None,
++    overlap_findings: list[CareerEvidenceOverlapFinding],
++) -> None:
++    """Ensure every approved-evidence target is active and user-owned."""
++
++    evidence_ids = {
++        finding.matching_evidence_id
++        for finding in overlap_findings
++        if finding.scope is EvidenceOverlapScope.APPROVED_EVIDENCE
++    }
++
++    if not evidence_ids:
++        return
++
++    if repository is None or user_id is None:
++        raise CVEvidenceReviewValidationError(
++            "Duplicate resolution requires a user-scoped evidence repository."
++        )
++
++    for evidence_id in evidence_ids:
++        if (
++            evidence_id is None
++            or repository.get_approved(
++                user_id=user_id,
++                evidence_id=evidence_id,
++            )
++            is None
++        ):
++            raise CVEvidenceReviewValidationError(
++                "Duplicate resolution target is unavailable for this user."
++            )
++
+ 
+ def approve_proposal(
+     *,
+@@ -312,3 +535,91 @@ def build_approved_evidence_id(
+     digest = sha256(proposal_id.encode("utf-8")).hexdigest()[:16].upper()
+ 
+     return f"EVD-{digest}"
++
++
++def replace_existing_evidence(
++    *,
++    existing: CareerEvidence,
++    accepted: CareerEvidence,
++) -> CareerEvidence:
++    """Replace content while preserving identity and complete provenance."""
++
++    return accepted.model_copy(
++        update={
++            "evidence_id": existing.evidence_id,
++            "lifecycle_status": existing.lifecycle_status,
++            "source_references": merge_source_references(
++                existing.source_references,
++                accepted.source_references,
++            ),
++        }
++    )
++
++
++def merge_evidence(
++    *,
++    existing: CareerEvidence,
++    accepted: CareerEvidence,
++) -> CareerEvidence:
++    """Deterministically combine supported fields into existing evidence."""
++
++    return existing.model_copy(
++        update={
++            "technologies": merge_strings(
++                existing.technologies,
++                accepted.technologies,
++            ),
++            "capabilities": merge_strings(
++                existing.capabilities,
++                accepted.capabilities,
++            ),
++            "approved_claims": merge_strings(
++                existing.approved_claims,
++                accepted.approved_claims,
++            ),
++            "source_references": merge_source_references(
++                existing.source_references,
++                accepted.source_references,
++            ),
++        }
++    )
++
++
++def merge_strings(first: list[str], second: list[str]) -> list[str]:
++    """Return a stable case-insensitive union without rewriting values."""
++
++    merged: list[str] = []
++    seen: set[str] = set()
++
++    for value in [*first, *second]:
++        key = value.strip().casefold()
++
++        if key not in seen:
++            merged.append(value)
++            seen.add(key)
++
++    return merged
++
++
++def merge_source_references(
++    first: list[SourceReference],
++    second: list[SourceReference],
++) -> list[SourceReference]:
++    """Return a stable union of exact provenance records."""
++
++    merged: list[SourceReference] = []
++    seen: set[tuple[str, str, int | None, str | None]] = set()
++
++    for reference in [*first, *second]:
++        key = (
++            reference.source_type.value,
++            reference.source_id,
++            reference.page_number,
++            reference.source_excerpt,
++        )
++
++        if key not in seen:
++            merged.append(reference)
++            seen.add(key)
++
++    return merged
+diff --git a/src/careerops_agent_engine/application/services/cv_evidence_workflow.py b/src/careerops_agent_engine/application/services/cv_evidence_workflow.py
+index 4bcc8e91c17a70f2e888677a622ab01634a31d9f..14b658aaafe55666b50f5c2e9646a14b03b3ee8f 100644
+--- a/src/careerops_agent_engine/application/services/cv_evidence_workflow.py
++++ b/src/careerops_agent_engine/application/services/cv_evidence_workflow.py
+@@ -191,6 +191,7 @@ class CVEvidenceWorkflowService:
+             )
+ 
+         result = self._review_service.review(
++            user_id=user_id,
+             proposals=snapshot.proposals,
+             overlap_findings=(snapshot.overlap_findings),
+             decision=decision,
+diff --git a/src/careerops_agent_engine/domain/enums.py b/src/careerops_agent_engine/domain/enums.py
+index bb41659aec6e5f8fbfe28c964d8d1fea4d00763c..145719345b42fed87c80d87e08479b5e7935b83b 100644
+--- a/src/careerops_agent_engine/domain/enums.py
++++ b/src/careerops_agent_engine/domain/enums.py
+@@ -127,6 +127,15 @@ class EvidenceOverlapScope(StrEnum):
+     APPROVED_EVIDENCE = "approved_evidence"
+ 
+ 
++class EvidenceDuplicateResolutionAction(StrEnum):
++    """Explicit human action for a deterministic evidence overlap."""
++
++    KEEP_EXISTING = "keep_existing"
++    ACCEPT_SEPARATE = "accept_separate"
++    REPLACE_EXISTING = "replace_existing"
++    MERGE_INTO_EXISTING = "merge_into_existing"
++
++
+ class CVEvidenceReviewRunStatus(StrEnum):
+     """Business lifecycle status of one CV evidence-review run."""
+ 
+diff --git a/src/careerops_agent_engine/domain/models/evidence.py b/src/careerops_agent_engine/domain/models/evidence.py
+index af9b4dee1a53fad8c2ec03642d557bf81dc5e1ba..038e2409a8386033ad8eb076159f5f77fae842f7 100644
+--- a/src/careerops_agent_engine/domain/models/evidence.py
++++ b/src/careerops_agent_engine/domain/models/evidence.py
+@@ -7,6 +7,7 @@ from pydantic import Field, model_validator
+ from careerops_agent_engine.domain.enums import (
+     CVSection,
+     EvidenceCategory,
++    EvidenceDuplicateResolutionAction,
+     EvidenceLifecycleStatus,
+     EvidenceOverlapScope,
+     EvidenceSourceType,
+@@ -113,6 +114,10 @@ class CareerEvidenceOverlapFinding(DomainModel):
+ 
+     same_source_excerpt: bool = False
+ 
++    allowed_actions: list[EvidenceDuplicateResolutionAction] = Field(
++        default_factory=list,
++    )
++
+     @model_validator(mode="after")
+     def validate_overlap_target(self) -> Self:
+         """Require the correct comparison identifier for each scope."""
+@@ -148,6 +153,20 @@ class CareerEvidenceOverlapFinding(DomainModel):
+                 "Evidence overlap requires a deterministic matching signal."
+             )
+ 
++        expected_actions = (
++            [
++                EvidenceDuplicateResolutionAction.KEEP_EXISTING,
++                EvidenceDuplicateResolutionAction.ACCEPT_SEPARATE,
++            ]
++            if self.scope is EvidenceOverlapScope.WITHIN_DOCUMENT
++            else list(EvidenceDuplicateResolutionAction)
++        )
++
++        if self.allowed_actions and self.allowed_actions != expected_actions:
++            raise ValueError("Overlap allowed actions must match the overlap scope.")
++
++        object.__setattr__(self, "allowed_actions", expected_actions)
++
+         return self
+ 
+ 
+diff --git a/src/careerops_agent_engine/domain/models/evidence_audit.py b/src/careerops_agent_engine/domain/models/evidence_audit.py
+index 49a9b73add0343ee4f759859bf25e4b0de448663..547ce7c3f643af1d7afef32da192c5b926cd2c7c 100644
+--- a/src/careerops_agent_engine/domain/models/evidence_audit.py
++++ b/src/careerops_agent_engine/domain/models/evidence_audit.py
+@@ -155,12 +155,9 @@ class CVEvidenceReviewAuditEntry(DomainModel):
+                 "Evidence audit edit result must match the human decision."
+             )
+ 
+-        if (
+-            self.result.acknowledged_overlap_proposal_ids
+-            != self.decision.acknowledged_overlap_proposal_ids
+-        ):
++        if self.result.duplicate_resolutions != self.decision.duplicate_resolutions:
+             raise ValueError(
+-                "Evidence audit overlap acknowledgements must match the human decision."
++                "Evidence audit duplicate resolutions must match the human decision."
+             )
+ 
+         return self
+diff --git a/src/careerops_agent_engine/domain/models/evidence_review.py b/src/careerops_agent_engine/domain/models/evidence_review.py
+index 1b972ef69bc12566d0aa0d37c5aba9291ebe28a4..82c3694cd1cab75f94c4e1e08bef3dabacf8fbf2 100644
+--- a/src/careerops_agent_engine/domain/models/evidence_review.py
++++ b/src/careerops_agent_engine/domain/models/evidence_review.py
+@@ -5,6 +5,9 @@ from typing import Self
+ from pydantic import Field, model_validator
+ 
+ from careerops_agent_engine.domain.enums import (
++    EvidenceDuplicateResolutionAction,
++    EvidenceLifecycleStatus,
++    EvidenceOverlapScope,
+     VerificationStatus,
+ )
+ from careerops_agent_engine.domain.models.base import DomainModel
+@@ -51,6 +54,83 @@ class EvidenceProposalEdit(DomainModel):
+         return self
+ 
+ 
++class EvidenceDuplicateResolution(DomainModel):
++    """One explicit action for one reported overlap finding."""
++
++    proposal_id: str = Field(min_length=1, max_length=64)
++    scope: EvidenceOverlapScope
++    action: EvidenceDuplicateResolutionAction
++    matching_proposal_id: str | None = Field(default=None, max_length=64)
++    matching_evidence_id: str | None = Field(default=None, max_length=64)
++
++    @model_validator(mode="after")
++    def validate_target_and_action(self) -> Self:
++        """Bind each action to a valid target for its overlap scope."""
++
++        if self.scope is EvidenceOverlapScope.WITHIN_DOCUMENT:
++            if (
++                self.matching_proposal_id is None
++                or self.matching_evidence_id is not None
++            ):
++                raise ValueError(
++                    "Within-document resolution requires one matching proposal."
++                )
++
++            if self.action not in {
++                EvidenceDuplicateResolutionAction.KEEP_EXISTING,
++                EvidenceDuplicateResolutionAction.ACCEPT_SEPARATE,
++            }:
++                raise ValueError(
++                    "Within-document overlap supports only keep-existing "
++                    "or accept-separate."
++                )
++
++        if self.scope is EvidenceOverlapScope.APPROVED_EVIDENCE and (
++            self.matching_evidence_id is None or self.matching_proposal_id is not None
++        ):
++            raise ValueError(
++                "Approved-evidence resolution requires one matching evidence item."
++            )
++
++        return self
++
++
++class EvidenceDuplicateUpdate(DomainModel):
++    """Auditable before/after state for one duplicate-driven update."""
++
++    proposal_id: str = Field(min_length=1, max_length=64)
++    action: EvidenceDuplicateResolutionAction
++    before: CareerEvidence
++    after: CareerEvidence
++
++    @model_validator(mode="after")
++    def validate_update(self) -> Self:
++        """Require one approved target and a supported mutation action."""
++
++        if self.action not in {
++            EvidenceDuplicateResolutionAction.REPLACE_EXISTING,
++            EvidenceDuplicateResolutionAction.MERGE_INTO_EXISTING,
++        }:
++            raise ValueError("Duplicate evidence update requires replace or merge.")
++
++        if self.before.evidence_id != self.after.evidence_id:
++            raise ValueError("Duplicate evidence update cannot change its identity.")
++
++        if any(
++            evidence.verification_status is not VerificationStatus.APPROVED
++            for evidence in (self.before, self.after)
++        ):
++            raise ValueError("Duplicate evidence update requires approved evidence.")
++
++        if any(
++            evidence.lifecycle_status is not EvidenceLifecycleStatus.ACTIVE
++            for evidence in (self.before, self.after)
++        ):
++            raise ValueError("Duplicate evidence update requires active evidence.")
++
++        return self
++
++
+ class EvidenceReviewDecision(DomainModel):
+     """One human decision covering a batch of evidence proposals."""
+ 
+@@ -60,7 +140,9 @@ class EvidenceReviewDecision(DomainModel):
+ 
+     edits: list[EvidenceProposalEdit] = Field(default_factory=list)
+ 
+-    acknowledged_overlap_proposal_ids: list[str] = Field(default_factory=list)
++    duplicate_resolutions: list[EvidenceDuplicateResolution] = Field(
++        default_factory=list,
++    )
+ 
+     reviewer_comment: str | None = Field(
+         default=None,
+@@ -74,7 +156,6 @@ class EvidenceReviewDecision(DomainModel):
+         approved_ids = self.approved_proposal_ids
+         rejected_ids = self.rejected_proposal_ids
+         edited_ids = [edit.proposal_id for edit in self.edits]
+-        acknowledged_ids = self.acknowledged_overlap_proposal_ids
+ 
+         if len(approved_ids) != len(set(approved_ids)):
+             raise ValueError("Approved evidence proposal identifiers must be unique.")
+@@ -85,8 +166,18 @@ class EvidenceReviewDecision(DomainModel):
+         if len(edited_ids) != len(set(edited_ids)):
+             raise ValueError("Edited evidence proposal identifiers must be unique.")
+ 
+-        if len(acknowledged_ids) != len(set(acknowledged_ids)):
+-            raise ValueError("Acknowledged overlap identifiers must be unique.")
++        resolution_keys = [
++            (
++                resolution.proposal_id,
++                resolution.scope,
++                resolution.matching_proposal_id,
++                resolution.matching_evidence_id,
++            )
++            for resolution in self.duplicate_resolutions
++        ]
++
++        if len(resolution_keys) != len(set(resolution_keys)):
++            raise ValueError("Duplicate overlap resolutions must be unique.")
+ 
+         approved_set = set(approved_ids)
+         rejected_set = set(rejected_ids)
+@@ -118,10 +209,14 @@ class EvidenceReviewResult(DomainModel):
+ 
+     rejected_proposal_ids: list[str] = Field(default_factory=list)
+ 
+-    acknowledged_overlap_proposal_ids: list[str] = Field(default_factory=list)
++    duplicate_resolutions: list[EvidenceDuplicateResolution] = Field(
++        default_factory=list,
++    )
+ 
+     approved_evidence: list[CareerEvidence] = Field(default_factory=list)
+ 
++    evidence_updates: list[EvidenceDuplicateUpdate] = Field(default_factory=list)
++
+     @model_validator(mode="after")
+     def validate_result(self) -> Self:
+         """Ensure only approved evidence appears in the result."""
+@@ -131,7 +226,49 @@ class EvidenceReviewResult(DomainModel):
+             *self.edited_proposal_ids,
+         }
+ 
+-        if len(self.approved_evidence) != len(accepted_ids):
++        mutation_resolutions = {
++            resolution.proposal_id
++            for resolution in self.duplicate_resolutions
++            if resolution.action
++            in {
++                EvidenceDuplicateResolutionAction.REPLACE_EXISTING,
++                EvidenceDuplicateResolutionAction.MERGE_INTO_EXISTING,
++            }
++        }
++        mutation_by_proposal = {
++            resolution.proposal_id: resolution
++            for resolution in self.duplicate_resolutions
++            if resolution.action
++            in {
++                EvidenceDuplicateResolutionAction.REPLACE_EXISTING,
++                EvidenceDuplicateResolutionAction.MERGE_INTO_EXISTING,
++            }
++        }
++
++        update_proposal_ids = [update.proposal_id for update in self.evidence_updates]
++
++        if len(update_proposal_ids) != len(set(update_proposal_ids)):
++            raise ValueError("Duplicate evidence updates must have unique proposals.")
++
++        if set(update_proposal_ids) != mutation_resolutions:
++            raise ValueError(
++                "Every merge or replacement must have one matching evidence update."
++            )
++
++        for update in self.evidence_updates:
++            resolution = mutation_by_proposal[update.proposal_id]
++
++            if (
++                update.action is not resolution.action
++                or update.after.evidence_id != resolution.matching_evidence_id
++            ):
++                raise ValueError(
++                    "Duplicate evidence update must match its recorded resolution."
++                )
++
++        if len(self.approved_evidence) + len(self.evidence_updates) != len(
++            accepted_ids
++        ):
+             raise ValueError(
+                 "Every accepted proposal must produce "
+                 "exactly one approved evidence record."
+@@ -139,7 +276,10 @@ class EvidenceReviewResult(DomainModel):
+ 
+         if any(
+             evidence.verification_status is not VerificationStatus.APPROVED
+-            for evidence in self.approved_evidence
++            for evidence in [
++                *self.approved_evidence,
++                *(update.after for update in self.evidence_updates),
++            ]
+         ):
+             raise ValueError(
+                 "Evidence review results may expose only approved evidence records."
+@@ -150,4 +290,14 @@ class EvidenceReviewResult(DomainModel):
+         if len(evidence_ids) != len(set(evidence_ids)):
+             raise ValueError("Approved evidence identifiers must be unique.")
+ 
++        updated_ids = [update.after.evidence_id for update in self.evidence_updates]
++
++        if len(updated_ids) != len(set(updated_ids)):
++            raise ValueError("Updated evidence identifiers must be unique.")
++
++        if set(evidence_ids) & set(updated_ids):
++            raise ValueError(
++                "Evidence cannot be both created and updated in one review."
++            )
++
+         return self
+diff --git a/src/careerops_agent_engine/infrastructure/repositories/sqlalchemy_cv_evidence_audit.py b/src/careerops_agent_engine/infrastructure/repositories/sqlalchemy_cv_evidence_audit.py
+index ce2cdb80ba4fd9a4a46c1f4b1eeb7582fc53b592..da39db44cba4f1b7512014761e790c309c983ccd 100644
+--- a/src/careerops_agent_engine/infrastructure/repositories/sqlalchemy_cv_evidence_audit.py
++++ b/src/careerops_agent_engine/infrastructure/repositories/sqlalchemy_cv_evidence_audit.py
+@@ -9,6 +9,8 @@ from careerops_agent_engine.application.ports.cv_evidence_audit_repository impor
+ )
+ from careerops_agent_engine.domain.enums import (
+     CVEvidenceReviewRunStatus,
++    EvidenceLifecycleStatus,
++    EvidenceMutationAction,
+     VerificationStatus,
+ )
+ from careerops_agent_engine.domain.models.evidence import (
+@@ -34,6 +36,8 @@ from careerops_agent_engine.infrastructure.database.models.evidence import (
+     CareerEvidenceRecord,
+ )
+ from careerops_agent_engine.infrastructure.repositories.sqlalchemy_evidence import (
++    add_history_entry,
++    load_managed_record_for_update,
+     record_to_domain,
+ )
+ 
+@@ -128,6 +132,14 @@ class SqlAlchemyCVEvidenceAuditRepository(
+                     evidence=evidence,
+                 )
+ 
++            for update in review.result.evidence_updates:
++                update_approved_evidence(
++                    session=session,
++                    user_id=snapshot.user_id,
++                    expected=update.before,
++                    evidence=update.after,
++                )
++
+             session.add(
+                 CVEvidenceReviewHistoryRecord(
+                     review_id=review.review_id,
+@@ -379,6 +391,62 @@ def insert_approved_evidence(
+     )
+ 
+ 
++def update_approved_evidence(
++    *,
++    session: Session,
++    user_id: str,
++    expected: CareerEvidence,
++    evidence: CareerEvidence,
++) -> None:
++    """Update one active user-owned item and append registry history."""
++
++    if (
++        evidence.verification_status is not VerificationStatus.APPROVED
++        or evidence.lifecycle_status is not EvidenceLifecycleStatus.ACTIVE
++    ):
++        raise ValueError(
++            "Duplicate resolution may update only active approved evidence."
++        )
++
++    record = load_managed_record_for_update(
++        session=session,
++        user_id=user_id,
++        evidence_id=evidence.evidence_id,
++    )
++
++    if record is None or (
++        record.lifecycle_status != EvidenceLifecycleStatus.ACTIVE.value
++    ):
++        raise ValueError("Duplicate resolution target is unavailable for this user.")
++
++    before = record_to_domain(record)
++
++    if before != expected:
++        raise ValueError("Duplicate resolution target changed after overlap review.")
++
++    record.category = evidence.category.value
++    record.title = evidence.title
++    record.technologies = list(evidence.technologies)
++    record.capabilities = list(evidence.capabilities)
++    record.approved_claims = list(evidence.approved_claims)
++    record.source_references = [
++        reference.model_dump(mode="json") for reference in evidence.source_references
++    ]
++    after = record_to_domain(record)
++
++    if after == before:
++        return
++
++    add_history_entry(
++        session=session,
++        user_id=user_id,
++        evidence_id=evidence.evidence_id,
++        action=EvidenceMutationAction.EDIT,
++        before=before,
++        after=after,
++    )
++
++
+ def review_run_record_to_domain(
+     record: CVEvidenceReviewRunRecord,
+ ) -> CVEvidenceReviewRunSnapshot:
+@@ -423,7 +491,9 @@ def review_run_record_to_summary(
+         status=CVEvidenceReviewRunStatus(record.status),
+         proposal_count=len(record.proposals),
+         approved_evidence_count=(
+-            len(review_result.approved_evidence) if review_result is not None else 0
++            len(review_result.approved_evidence) + len(review_result.evidence_updates)
++            if review_result is not None
++            else 0
+         ),
+         created_at=record.created_at,
+         updated_at=record.updated_at,
+@@ -484,6 +554,20 @@ def validate_idempotent_review_retry(
+                 "Retry evidence does not match the persisted approved evidence."
+             )
+ 
++    for update in review.result.evidence_updates:
++        record = session.get(
++            CareerEvidenceRecord,
++            (
++                snapshot.user_id,
++                update.after.evidence_id,
++            ),
++        )
++
++        if record is None or record_to_domain(record) != update.after:
++            raise ValueError(
++                "Retry evidence does not match the persisted updated evidence."
++            )
++
+ 
+ def reviews_are_equivalent(
+     first: CVEvidenceReviewAuditEntry,
+diff --git a/tests/unit/application/test_cv_evidence_duplicates.py b/tests/unit/application/test_cv_evidence_duplicates.py
+index f08581eb40f8eb48615800ffe22349ae870986a9..ba37f73c9592adab83f43809551678a1bea3e4dc 100644
+--- a/tests/unit/application/test_cv_evidence_duplicates.py
++++ b/tests/unit/application/test_cv_evidence_duplicates.py
+@@ -9,6 +9,7 @@ from careerops_agent_engine.application.services.cv_evidence_duplicates import (
+ from careerops_agent_engine.domain.enums import (
+     CVSection,
+     EvidenceCategory,
++    EvidenceDuplicateResolutionAction,
+     EvidenceOverlapScope,
+     EvidenceSourceType,
+     VerificationStatus,
+@@ -114,6 +115,10 @@ def test_normalised_claim_overlap_is_detected_within_document() -> None:
+     assert finding.proposal_id == "EVP-002"
+     assert finding.matching_proposal_id == "EVP-001"
+     assert finding.matched_claims == ["BUILT Python APIs using FastAPI"]
++    assert finding.allowed_actions == [
++        EvidenceDuplicateResolutionAction.KEEP_EXISTING,
++        EvidenceDuplicateResolutionAction.ACCEPT_SEPARATE,
++    ]
+ 
+ 
+ def test_same_source_excerpt_is_detected_within_document() -> None:
+@@ -182,6 +187,7 @@ def test_overlap_with_approved_evidence_is_detected() -> None:
+     assert finding.scope is EvidenceOverlapScope.APPROVED_EVIDENCE
+ 
+     assert finding.matching_evidence_id == "EVD-001"
++    assert finding.allowed_actions == list(EvidenceDuplicateResolutionAction)
+ 
+ 
+ def test_rejected_and_cross_user_evidence_are_not_compared() -> None:
+diff --git a/tests/unit/application/test_cv_evidence_review.py b/tests/unit/application/test_cv_evidence_review.py
+index a005c694bab80c54acce2351571fd892694a1f64..3d39f13ef3916e68cde42a41827ee1d6eb9c5da6 100644
+--- a/tests/unit/application/test_cv_evidence_review.py
++++ b/tests/unit/application/test_cv_evidence_review.py
+@@ -12,19 +12,25 @@ from careerops_agent_engine.application.services.cv_evidence_review import (
+ from careerops_agent_engine.domain.enums import (
+     CVSection,
+     EvidenceCategory,
++    EvidenceDuplicateResolutionAction,
+     EvidenceOverlapScope,
+     EvidenceSourceType,
+     VerificationStatus,
+ )
+ from careerops_agent_engine.domain.models.evidence import (
++    CareerEvidence,
+     CareerEvidenceOverlapFinding,
+     CareerEvidenceProposal,
+     SourceReference,
+ )
+ from careerops_agent_engine.domain.models.evidence_review import (
++    EvidenceDuplicateResolution,
+     EvidenceProposalEdit,
+     EvidenceReviewDecision,
+ )
++from careerops_agent_engine.infrastructure.repositories.in_memory_evidence import (
++    InMemoryEvidenceRepository,
++)
+ 
+ 
+ def build_proposal(
+@@ -74,6 +80,49 @@ def standard_proposal() -> CareerEvidenceProposal:
+     )
+ 
+ 
++def existing_evidence() -> CareerEvidence:
++    """Create the existing approved overlap target."""
++
++    return CareerEvidence(
++        evidence_id="EVD-EXISTING",
++        category=EvidenceCategory.PROJECT,
++        title="Existing CareerOps evidence",
++        verification_status=VerificationStatus.APPROVED,
++        technologies=["Python"],
++        capabilities=["API development"],
++        approved_claims=["Built an earlier CareerOps API."],
++        source_references=[
++            SourceReference(
++                source_type=EvidenceSourceType.UPLOADED_CV,
++                source_id="DOC-OLD",
++                source_excerpt="Built an earlier CareerOps API.",
++            )
++        ],
++    )
++
++
++def review_service() -> CVEvidenceReviewService:
++    """Create a review service with one user-owned target."""
++
++    return CVEvidenceReviewService(
++        repository=InMemoryEvidenceRepository({"USER-001": [existing_evidence()]})
++    )
++
++
++def approved_resolution(
++    *,
++    action: EvidenceDuplicateResolutionAction,
++) -> EvidenceDuplicateResolution:
++    """Create a resolution for the standard approved-evidence finding."""
++
++    return EvidenceDuplicateResolution(
++        proposal_id="EVP-001",
++        scope=EvidenceOverlapScope.APPROVED_EVIDENCE,
++        matching_evidence_id="EVD-EXISTING",
++        action=action,
++    )
++
++
+ def test_approve_creates_only_approved_evidence() -> None:
+     """Explicit approval should cross the evidence trust boundary."""
+ 
+@@ -229,7 +278,7 @@ def test_unmentioned_human_technology_is_rejected() -> None:
+         )
+ 
+ 
+-def test_overlap_requires_explicit_acknowledgement() -> None:
++def test_overlap_requires_explicit_resolution() -> None:
+     """A duplicate warning cannot be silently ignored on approval."""
+ 
+     proposal = standard_proposal()
+@@ -244,7 +293,7 @@ def test_overlap_requires_explicit_acknowledgement() -> None:
+ 
+     with pytest.raises(
+         CVEvidenceReviewValidationError,
+-        match="explicit human acknowledgement",
++        match="explicit duplicate resolution",
+     ):
+         CVEvidenceReviewService().review(
+             proposals=[proposal],
+@@ -255,8 +304,8 @@ def test_overlap_requires_explicit_acknowledgement() -> None:
+         )
+ 
+ 
+-def test_acknowledged_overlap_may_be_approved() -> None:
+-    """A human may deliberately accept overlapping evidence."""
++def test_overlap_may_be_accepted_as_separate() -> None:
++    """A human may deliberately accept overlapping evidence separately."""
+ 
+     proposal = standard_proposal()
+ 
+@@ -268,22 +317,29 @@ def test_acknowledged_overlap_may_be_approved() -> None:
+         same_source_excerpt=False,
+     )
+ 
+-    result = CVEvidenceReviewService().review(
++    result = review_service().review(
++        user_id="USER-001",
+         proposals=[proposal],
+         overlap_findings=[finding],
+         decision=EvidenceReviewDecision(
+             approved_proposal_ids=[proposal.proposal_id],
+-            acknowledged_overlap_proposal_ids=[proposal.proposal_id],
++            duplicate_resolutions=[
++                approved_resolution(
++                    action=EvidenceDuplicateResolutionAction.ACCEPT_SEPARATE
++                )
++            ],
+         ),
+     )
+ 
+     assert len(result.approved_evidence) == 1
+ 
+-    assert result.acknowledged_overlap_proposal_ids == [proposal.proposal_id]
++    assert result.duplicate_resolutions[0].action is (
++        EvidenceDuplicateResolutionAction.ACCEPT_SEPARATE
++    )
+ 
+ 
+-def test_rejected_overlap_needs_no_acknowledgement() -> None:
+-    """Rejecting duplicate evidence should not require acknowledgement."""
++def test_rejected_overlap_keeps_existing_evidence() -> None:
++    """Rejecting a duplicate must explicitly retain existing evidence."""
+ 
+     proposal = standard_proposal()
+ 
+@@ -294,10 +350,18 @@ def test_rejected_overlap_needs_no_acknowledgement() -> None:
+         matched_claims=["CareerOps Agent Engine."],
+     )
+ 
+-    result = CVEvidenceReviewService().review(
++    result = review_service().review(
++        user_id="USER-001",
+         proposals=[proposal],
+         overlap_findings=[finding],
+-        decision=EvidenceReviewDecision(rejected_proposal_ids=[proposal.proposal_id]),
++        decision=EvidenceReviewDecision(
++            rejected_proposal_ids=[proposal.proposal_id],
++            duplicate_resolutions=[
++                approved_resolution(
++                    action=EvidenceDuplicateResolutionAction.KEEP_EXISTING
++                )
++            ],
++        ),
+     )
+ 
+     assert result.approved_evidence == []
+@@ -305,6 +369,93 @@ def test_rejected_overlap_needs_no_acknowledgement() -> None:
+     assert result.rejected_proposal_ids == [proposal.proposal_id]
+ 
+ 
++@pytest.mark.parametrize(
++    ("action", "expected_title", "expected_claims"),
++    [
++        (
++            EvidenceDuplicateResolutionAction.REPLACE_EXISTING,
++            "CareerOps Agent Engine",
++            [
++                "CareerOps Agent Engine.",
++                "Built Python APIs using FastAPI and Docker.",
++            ],
++        ),
++        (
++            EvidenceDuplicateResolutionAction.MERGE_INTO_EXISTING,
++            "Existing CareerOps evidence",
++            [
++                "Built an earlier CareerOps API.",
++                "CareerOps Agent Engine.",
++                "Built Python APIs using FastAPI and Docker.",
++            ],
++        ),
++    ],
++)
++def test_overlap_can_replace_or_merge_existing_evidence(
++    action: EvidenceDuplicateResolutionAction,
++    expected_title: str,
++    expected_claims: list[str],
++) -> None:
++    """Mutation actions preserve the existing ID and grounded provenance."""
++
++    proposal = standard_proposal()
++    finding = CareerEvidenceOverlapFinding(
++        proposal_id=proposal.proposal_id,
++        scope=EvidenceOverlapScope.APPROVED_EVIDENCE,
++        matching_evidence_id="EVD-EXISTING",
++        matched_claims=["CareerOps Agent Engine."],
++    )
++
++    result = review_service().review(
++        user_id="USER-001",
++        proposals=[proposal],
++        overlap_findings=[finding],
++        decision=EvidenceReviewDecision(
++            approved_proposal_ids=[proposal.proposal_id],
++            duplicate_resolutions=[approved_resolution(action=action)],
++        ),
++    )
++
++    assert result.approved_evidence == []
++    assert len(result.evidence_updates) == 1
++    update = result.evidence_updates[0]
++    assert update.before == existing_evidence()
++    assert update.after.evidence_id == "EVD-EXISTING"
++    assert update.after.title == expected_title
++    assert update.after.approved_claims == expected_claims
++    assert len(update.after.source_references) == 2
++
++
++def test_resolution_cannot_target_another_users_evidence() -> None:
++    """A persisted finding cannot bypass the authenticated user boundary."""
++
++    proposal = standard_proposal()
++    finding = CareerEvidenceOverlapFinding(
++        proposal_id=proposal.proposal_id,
++        scope=EvidenceOverlapScope.APPROVED_EVIDENCE,
++        matching_evidence_id="EVD-EXISTING",
++        matched_claims=["CareerOps Agent Engine."],
++    )
++
++    with pytest.raises(
++        CVEvidenceReviewValidationError,
++        match="unavailable for this user",
++    ):
++        review_service().review(
++            user_id="USER-OTHER",
++            proposals=[proposal],
++            overlap_findings=[finding],
++            decision=EvidenceReviewDecision(
++                approved_proposal_ids=[proposal.proposal_id],
++                duplicate_resolutions=[
++                    approved_resolution(
++                        action=EvidenceDuplicateResolutionAction.ACCEPT_SEPARATE
++                    )
++                ],
++            ),
++        )
++
++
+ def test_approved_evidence_id_is_stable() -> None:
+     """Retrying approval of one proposal retains its evidence ID."""
+ 
+diff --git a/tests/unit/application/test_cv_evidence_workflow.py b/tests/unit/application/test_cv_evidence_workflow.py
+index 65900577a54f9e37b2fc8fc8cda4e602a3ce548c..7617a1ba66dcfe7b4f32d3507b8a39b375c879f3 100644
+--- a/tests/unit/application/test_cv_evidence_workflow.py
++++ b/tests/unit/application/test_cv_evidence_workflow.py
+@@ -28,7 +28,9 @@ from careerops_agent_engine.domain.enums import (
+     CareerDocumentStatus,
+     CVEvidenceReviewRunStatus,
+     EvidenceCategory,
++    EvidenceDuplicateResolutionAction,
+     EvidenceOverlapScope,
++    EvidenceSourceType,
+     VerificationStatus,
+ )
+ from careerops_agent_engine.domain.models.document import (
+@@ -37,14 +39,17 @@ from careerops_agent_engine.domain.models.document import (
+     ParsedCVDocument,
+ )
+ from careerops_agent_engine.domain.models.evidence import (
++    CareerEvidence,
+     CareerEvidenceCandidate,
+     CareerEvidenceOverlapFinding,
++    SourceReference,
+ )
+ from careerops_agent_engine.domain.models.evidence_audit import (
+     CVEvidenceReviewAuditEntry,
+     CVEvidenceReviewRunSnapshot,
+ )
+ from careerops_agent_engine.domain.models.evidence_review import (
++    EvidenceDuplicateResolution,
+     EvidenceReviewDecision,
+ )
+ from careerops_agent_engine.infrastructure.documents.cv_section_parser import (
+@@ -410,15 +415,38 @@ def build_workflow(
+ 
+     proposal_service = CVEvidenceProposalService(extractor=candidate_extractor)
+ 
++    evidence_repository = InMemoryEvidenceRepository(
++        {
++            "USER-001": [
++                CareerEvidence(
++                    evidence_id="EVD-EXISTING",
++                    category=EvidenceCategory.PROJECT,
++                    title="Existing unrelated evidence",
++                    verification_status=VerificationStatus.APPROVED,
++                    technologies=[],
++                    capabilities=[],
++                    approved_claims=["Maintained a legacy service."],
++                    source_references=[
++                        SourceReference(
++                            source_type=EvidenceSourceType.UPLOADED_CV,
++                            source_id="DOC-OLD",
++                            source_excerpt="Maintained a legacy service.",
++                        )
++                    ],
++                )
++            ]
++        }
++    )
++
+     workflow = CVEvidenceWorkflowService(
+         document_repository=document_repository,
+         audit_repository=audit_repository,
+         preparation_service=preparation_service,
+         proposal_service=proposal_service,
+         duplicate_detector=(
+-            CVEvidenceDuplicateDetector(repository=(InMemoryEvidenceRepository()))
++            CVEvidenceDuplicateDetector(repository=evidence_repository)
+         ),
+-        review_service=(CVEvidenceReviewService()),
++        review_service=(CVEvidenceReviewService(repository=evidence_repository)),
+     )
+ 
+     return (
+@@ -571,7 +599,14 @@ def test_submit_review_uses_persisted_proposals_and_findings() -> None:
+ 
+     decision = EvidenceReviewDecision(
+         approved_proposal_ids=[proposal.proposal_id],
+-        acknowledged_overlap_proposal_ids=[proposal.proposal_id],
++        duplicate_resolutions=[
++            EvidenceDuplicateResolution(
++                proposal_id=proposal.proposal_id,
++                scope=EvidenceOverlapScope.APPROVED_EVIDENCE,
++                matching_evidence_id="EVD-EXISTING",
++                action=EvidenceDuplicateResolutionAction.ACCEPT_SEPARATE,
++            )
++        ],
+         reviewer_comment=("Reviewed and accepted overlap."),
+     )
+ 
+diff --git a/tests/unit/domain/test_evidence_review_models.py b/tests/unit/domain/test_evidence_review_models.py
+index 00f2dfd32fa4a7022f67c4b8dc47423271735bcf..24ab6b262487628472019a65d8ed8bbd956e9ba2 100644
+--- a/tests/unit/domain/test_evidence_review_models.py
++++ b/tests/unit/domain/test_evidence_review_models.py
+@@ -3,7 +3,12 @@
+ import pytest
+ from pydantic import ValidationError
+ 
++from careerops_agent_engine.domain.enums import (
++    EvidenceDuplicateResolutionAction,
++    EvidenceOverlapScope,
++)
+ from careerops_agent_engine.domain.models.evidence_review import (
++    EvidenceDuplicateResolution,
+     EvidenceProposalEdit,
+     EvidenceReviewDecision,
+ )
+@@ -58,3 +63,18 @@ def test_mixed_review_decision_is_valid() -> None:
+ 
+     assert decision.approved_proposal_ids == ["EVP-001"]
+     assert decision.edits[0].proposal_id == ("EVP-002")
++
++
++def test_within_document_overlap_rejects_existing_evidence_mutation() -> None:
++    """A pending proposal cannot be used as a replace or merge target."""
++
++    with pytest.raises(
++        ValidationError,
++        match="supports only keep-existing or accept-separate",
++    ):
++        EvidenceDuplicateResolution(
++            proposal_id="EVP-002",
++            scope=EvidenceOverlapScope.WITHIN_DOCUMENT,
++            matching_proposal_id="EVP-001",
++            action=EvidenceDuplicateResolutionAction.MERGE_INTO_EXISTING,
++        )
+diff --git a/tests/unit/infrastructure/repositories/test_sqlalchemy_cv_evidence_audit.py b/tests/unit/infrastructure/repositories/test_sqlalchemy_cv_evidence_audit.py
+index 45e5a4b192584e143109bdf9d0bc751e8b97ad53..1a4b7dc9c186198892e1bb098cb04e2fec025d83 100644
+--- a/tests/unit/infrastructure/repositories/test_sqlalchemy_cv_evidence_audit.py
++++ b/tests/unit/infrastructure/repositories/test_sqlalchemy_cv_evidence_audit.py
+@@ -12,6 +12,8 @@ from careerops_agent_engine.domain.enums import (
+     CVEvidenceReviewRunStatus,
+     CVSection,
+     EvidenceCategory,
++    EvidenceDuplicateResolutionAction,
++    EvidenceOverlapScope,
+     EvidenceSourceType,
+     VerificationStatus,
+ )
+@@ -20,6 +22,7 @@ from careerops_agent_engine.domain.models.document import (
+ )
+ from careerops_agent_engine.domain.models.evidence import (
+     CareerEvidence,
++    CareerEvidenceOverlapFinding,
+     CareerEvidenceProposal,
+     SourceReference,
+ )
+@@ -28,6 +31,8 @@ from careerops_agent_engine.domain.models.evidence_audit import (
+     CVEvidenceReviewRunSnapshot,
+ )
+ from careerops_agent_engine.domain.models.evidence_review import (
++    EvidenceDuplicateResolution,
++    EvidenceDuplicateUpdate,
+     EvidenceReviewDecision,
+     EvidenceReviewResult,
+ )
+@@ -334,6 +339,105 @@ def test_identical_review_retry_is_idempotent(
+     )
+ 
+ 
++def test_duplicate_update_is_atomic_audited_and_idempotent(
++    repositories: tuple[
++        SqlAlchemyCVEvidenceAuditRepository,
++        SqlAlchemyCareerDocumentRepository,
++        SqlAlchemyEvidenceRepository,
++    ],
++) -> None:
++    """A merge/replace result updates in place with durable before/after audit."""
++
++    audit_repository, _, evidence_repository = repositories
++    audit_repository.save_review_result(
++        snapshot=build_completed_snapshot(),
++        review=build_review(),
++    )
++
++    before = build_approved_evidence()
++    after = before.model_copy(
++        update={
++            "title": "Updated CareerOps",
++            "approved_claims": [
++                "Built CareerOps using Python and FastAPI.",
++                "Added deterministic evidence resolution.",
++            ],
++        }
++    )
++    resolution = EvidenceDuplicateResolution(
++        proposal_id="EVP-001",
++        scope=EvidenceOverlapScope.APPROVED_EVIDENCE,
++        matching_evidence_id="EVD-001",
++        action=EvidenceDuplicateResolutionAction.MERGE_INTO_EXISTING,
++    )
++    result = EvidenceReviewResult(
++        approved_proposal_ids=["EVP-001"],
++        duplicate_resolutions=[resolution],
++        evidence_updates=[
++            EvidenceDuplicateUpdate(
++                proposal_id="EVP-001",
++                action=EvidenceDuplicateResolutionAction.MERGE_INTO_EXISTING,
++                before=before,
++                after=after,
++            )
++        ],
++    )
++    snapshot = CVEvidenceReviewRunSnapshot(
++        review_run_id="EVR-001",
++        user_id="USER-001",
++        document_id="DOC-001",
++        status=CVEvidenceReviewRunStatus.COMPLETED,
++        proposals=[build_proposal()],
++        overlap_findings=[
++            CareerEvidenceOverlapFinding(
++                proposal_id="EVP-001",
++                scope=EvidenceOverlapScope.APPROVED_EVIDENCE,
++                matching_evidence_id="EVD-001",
++                matched_claims=["Built CareerOps using Python and FastAPI."],
++            )
++        ],
++        review_result=result,
++    )
++    review = CVEvidenceReviewAuditEntry(
++        review_id="EVR-AUDIT-002",
++        review_run_id="EVR-001",
++        sequence_number=2,
++        decision=EvidenceReviewDecision(
++            approved_proposal_ids=["EVP-001"],
++            duplicate_resolutions=[resolution],
++        ),
++        result=result,
++    )
++
++    audit_repository.save_review_result(snapshot=snapshot, review=review)
++    audit_repository.save_review_result(snapshot=snapshot, review=review)
++
++    assert (
++        evidence_repository.get_approved(
++            user_id="USER-001",
++            evidence_id="EVD-001",
++        )
++        == after
++    )
++    assert (
++        audit_repository.get_run(
++            user_id="USER-001",
++            review_run_id="EVR-001",
++        )
++        == snapshot
++    )
++    reviews = audit_repository.list_reviews(
++        user_id="USER-001",
++        review_run_id="EVR-001",
++    )
++    assert [item.review_id for item in reviews] == [
++        "EVR-AUDIT-001",
++        "EVR-AUDIT-002",
++    ]
++    assert reviews[-1].result.evidence_updates[0].before == before
++    assert reviews[-1].result.evidence_updates[0].after == after
++
++
+ def test_duplicate_sequence_rolls_back_snapshot_update(
+     repositories: tuple[
+         SqlAlchemyCVEvidenceAuditRepository,

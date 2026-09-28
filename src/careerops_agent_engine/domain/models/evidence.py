@@ -7,6 +7,7 @@ from pydantic import Field, model_validator
 from careerops_agent_engine.domain.enums import (
     CVSection,
     EvidenceCategory,
+    EvidenceDuplicateResolutionAction,
     EvidenceLifecycleStatus,
     EvidenceOverlapScope,
     EvidenceSourceType,
@@ -113,6 +114,10 @@ class CareerEvidenceOverlapFinding(DomainModel):
 
     same_source_excerpt: bool = False
 
+    allowed_actions: list[EvidenceDuplicateResolutionAction] = Field(
+        default_factory=list,
+    )
+
     @model_validator(mode="after")
     def validate_overlap_target(self) -> Self:
         """Require the correct comparison identifier for each scope."""
@@ -147,6 +152,20 @@ class CareerEvidenceOverlapFinding(DomainModel):
             raise ValueError(
                 "Evidence overlap requires a deterministic matching signal."
             )
+
+        expected_actions = (
+            [
+                EvidenceDuplicateResolutionAction.KEEP_EXISTING,
+                EvidenceDuplicateResolutionAction.ACCEPT_SEPARATE,
+            ]
+            if self.scope is EvidenceOverlapScope.WITHIN_DOCUMENT
+            else list(EvidenceDuplicateResolutionAction)
+        )
+
+        if self.allowed_actions and self.allowed_actions != expected_actions:
+            raise ValueError("Overlap allowed actions must match the overlap scope.")
+
+        object.__setattr__(self, "allowed_actions", expected_actions)
 
         return self
 
