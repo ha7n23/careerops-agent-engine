@@ -171,12 +171,14 @@ def test_full_job_analysis_uses_approved_cv_evidence_safely() -> None:
         reviewer_comment=("7H3 live full-workflow integration proof."),
     )
 
-    evidence_review_audit = CVEvidenceReviewAuditEntry(
-        review_id=evidence_review_id,
-        review_run_id=evidence_review_run_id,
-        sequence_number=1,
-        decision=evidence_review_decision,
-        result=evidence_review_result,
+    evidence_review_audit = CVEvidenceReviewAuditEntry.model_validate(
+        {
+            "review_id": evidence_review_id,
+            "review_run_id": evidence_review_run_id,
+            "sequence_number": 1,
+            "decision": evidence_review_decision,
+            "result": evidence_review_result,
+        }
     )
 
     job_description = (
