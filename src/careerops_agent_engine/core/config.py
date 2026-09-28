@@ -49,6 +49,11 @@ class Settings(BaseSettings):
     llm_temperature: float = Field(default=1.0, ge=0.0, le=2.0)
     llm_timeout_seconds: float = Field(default=60.0, gt=0.0)
     llm_max_retries: int = Field(default=2, ge=0, le=5)
+    llm_max_output_tokens: int = Field(
+        default=4_096,
+        ge=256,
+        le=65_536,
+    )
     llm_requests_per_minute: float = Field(
         default=4.0,
         gt=0.0,
