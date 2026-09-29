@@ -2,7 +2,7 @@
 
 from langchain_core.prompts import ChatPromptTemplate
 
-PROMPT_VERSION = "cv-evidence-extraction-v2"
+PROMPT_VERSION = "cv-evidence-extraction-v3"
 
 CV_EVIDENCE_EXTRACTION_PROMPT = ChatPromptTemplate.from_messages(
     [
@@ -49,6 +49,9 @@ Grouping rules:
 - Avoid duplicating the same fact across multiple candidates.
 
 Category rules:
+- category must be exactly one of: project, employment, education,
+  certification, achievement, skill.
+- "experience" is a CV section name, not a valid category value.
 - profile: skill or achievement only when uniquely supported there.
 - skills: skill.
 - experience: employment or achievement.

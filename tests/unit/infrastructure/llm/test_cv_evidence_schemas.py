@@ -45,3 +45,28 @@ def test_candidate_limit_is_exposed_in_json_schema() -> None:
     schema = ExtractedCareerEvidenceSet.model_json_schema()
 
     assert schema["properties"]["candidates"]["maxItems"] == MAX_CV_EVIDENCE_CANDIDATES
+
+
+def test_candidate_normalizes_experience_category_to_employment() -> None:
+    """Provider section terminology should map to the domain vocabulary."""
+
+    candidate = ExtractedCareerEvidenceCandidate.model_validate(
+        {
+            **build_candidate().model_dump(),
+            "category": "experience",
+        }
+    )
+
+    assert candidate.category is EvidenceCategory.EMPLOYMENT
+
+
+def test_candidate_still_rejects_unknown_category() -> None:
+    """Compatibility handling must not allow arbitrary categories."""
+
+    with pytest.raises(ValidationError):
+        ExtractedCareerEvidenceCandidate.model_validate(
+            {
+                **build_candidate().model_dump(),
+                "category": "volunteering",
+            }
+        )
