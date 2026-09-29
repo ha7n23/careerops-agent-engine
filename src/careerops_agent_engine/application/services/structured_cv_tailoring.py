@@ -211,6 +211,12 @@ class StructuredCVProposalApplier:
 
             supporting_evidence.append(evidence)
 
+        if proposal.target_entry_id is not None:
+            raise StructuredCVAssemblyError(
+                "Entry-targeted CV proposals are not supported "
+                "until structured source entries are available."
+            )
+
         matching_sections = [
             (
                 index,
@@ -220,9 +226,16 @@ class StructuredCVProposalApplier:
             if section.section is proposal.section
         ]
 
-        if len(matching_sections) != 1:
+        if len(matching_sections) > 1:
             raise StructuredCVAssemblyError(
                 "A CV proposal must target exactly one structured CV section."
+            )
+
+        if not matching_sections:
+            return self._resolve_missing_section_proposal(
+                base_cv=base_cv,
+                proposal=proposal,
+                supporting_evidence=supporting_evidence,
             )
 
         section_index, section = matching_sections[0]
@@ -231,12 +244,6 @@ class StructuredCVProposalApplier:
             raise StructuredCVAssemblyError(
                 "Anchored proposal application currently "
                 "requires source section free text."
-            )
-
-        if proposal.target_entry_id is not None:
-            raise StructuredCVAssemblyError(
-                "Entry-targeted CV proposals are not supported "
-                "until structured source entries are available."
             )
 
         if proposal.current_text is not None:
@@ -292,6 +299,74 @@ class StructuredCVProposalApplier:
 
         return ResolvedProposalChange(
             proposal=proposal,
+            section_index=section_index,
+            anchor=anchor,
+        )
+
+    @staticmethod
+    def _resolve_missing_section_proposal(
+        *,
+        base_cv: StructuredCV,
+        proposal: CVChangeProposal,
+        supporting_evidence: list[CareerEvidence],
+    ) -> ResolvedProposalChange:
+        """Reconcile a stale section label using one unique source anchor."""
+
+        candidate_anchors: dict[str, set[str]] = {}
+
+        if proposal.current_text is not None:
+            candidate_anchors[proposal.current_text] = set()
+        else:
+            for evidence in supporting_evidence:
+                for reference in evidence.source_references:
+                    if (
+                        reference.source_type is EvidenceSourceType.UPLOADED_CV
+                        and reference.source_id == base_cv.source_document_id
+                        and reference.source_excerpt is not None
+                    ):
+                        candidate_anchors.setdefault(
+                            reference.source_excerpt,
+                            set(),
+                        ).add(evidence.evidence_id)
+
+        resolved_candidates: list[tuple[int, CVChangeProposal, ResolvedAnchor]] = []
+
+        for section_index, section in enumerate(base_cv.sections):
+            if section.free_text is None:
+                continue
+
+            for anchor_text, evidence_ids in candidate_anchors.items():
+                matches = list(
+                    build_whitespace_pattern(anchor_text).finditer(section.free_text)
+                )
+
+                for match in matches:
+                    resolved_candidates.append(
+                        (
+                            section_index,
+                            proposal.model_copy(
+                                update={"section": section.section},
+                            ),
+                            ResolvedAnchor(
+                                start=match.start(),
+                                end=match.end(),
+                                source_anchor=anchor_text,
+                                original_text=match.group(0),
+                                anchor_evidence_ids=tuple(sorted(evidence_ids)),
+                            ),
+                        )
+                    )
+
+        if len(resolved_candidates) != 1:
+            raise StructuredCVAssemblyError(
+                "A CV proposal whose declared section is absent requires "
+                "exactly one grounded source anchor across the selected CV."
+            )
+
+        section_index, reconciled_proposal, anchor = resolved_candidates[0]
+
+        return ResolvedProposalChange(
+            proposal=reconciled_proposal,
             section_index=section_index,
             anchor=anchor,
         )
