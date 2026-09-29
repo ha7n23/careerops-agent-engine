@@ -241,6 +241,68 @@ def test_applier_rejects_evidence_from_other_document() -> None:
         )
 
 
+def test_applier_reconciles_absent_section_from_unique_source_anchor() -> None:
+    """A stale proposal section may resolve to one grounded source section."""
+
+    cv = build_cv().model_copy(
+        update={
+            "sections": [
+                StructuredCVSection(
+                    section=CVSection.EXPERIENCE,
+                    heading="Experience",
+                    free_text=SOURCE_TEXT,
+                )
+            ]
+        }
+    )
+
+    result = StructuredCVProposalApplier().apply(
+        base_cv=cv,
+        proposals=[build_proposal()],
+        approved_evidence=[build_evidence()],
+    )
+
+    assert result.structured_cv.sections[0].free_text == (
+        "CareerOps\n"
+        "Built CareerOps using Python, FastAPI "
+        "and PostgreSQL.\n"
+        "Another project remained unchanged."
+    )
+    assert result.applied_changes[0].section is CVSection.EXPERIENCE
+    assert result.applied_changes[0].anchor_evidence_ids == ["EVD-001"]
+
+
+def test_applier_rejects_ambiguous_anchor_when_section_is_absent() -> None:
+    """A stale section label must never cause a guessed replacement."""
+
+    cv = build_cv().model_copy(
+        update={
+            "sections": [
+                StructuredCVSection(
+                    section=CVSection.EXPERIENCE,
+                    heading="Experience",
+                    free_text=SOURCE_TEXT,
+                ),
+                StructuredCVSection(
+                    section=CVSection.PROFILE,
+                    heading="Profile",
+                    free_text=("Built CareerOps using Python and FastAPI."),
+                ),
+            ]
+        }
+    )
+
+    with pytest.raises(
+        StructuredCVAssemblyError,
+        match="exactly one grounded source anchor across",
+    ):
+        StructuredCVProposalApplier().apply(
+            base_cv=cv,
+            proposals=[build_proposal()],
+            approved_evidence=[build_evidence()],
+        )
+
+
 def test_applier_rejects_overlapping_changes() -> None:
     """Two proposals cannot mutate overlapping source content."""
 
