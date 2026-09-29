@@ -1,6 +1,8 @@
 """Provider-facing schemas for structured LLM operations."""
 
-from pydantic import Field
+from typing import Any
+
+from pydantic import Field, field_validator
 
 from careerops_agent_engine.application.ports.cv_evidence_extractor import (
     MAX_CV_EVIDENCE_CANDIDATES,
@@ -144,6 +146,15 @@ class ExtractedCareerEvidenceCandidate(DomainModel):
     capabilities: list[str]
     claims: list[str]
     warnings: list[str]
+
+    @field_validator("category", mode="before")
+    @classmethod
+    def normalize_provider_category(cls, value: Any) -> Any:
+        """Translate the common CV section label into the domain category."""
+        if isinstance(value, str) and value.strip().lower() == "experience":
+            return EvidenceCategory.EMPLOYMENT
+
+        return value
 
 
 class ExtractedCareerEvidenceSet(DomainModel):
