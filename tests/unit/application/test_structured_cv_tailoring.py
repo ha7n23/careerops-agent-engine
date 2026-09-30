@@ -227,18 +227,27 @@ def test_applier_rejects_unapproved_evidence() -> None:
         )
 
 
-def test_applier_rejects_evidence_from_other_document() -> None:
-    """Evidence from another source CV cannot anchor this document."""
+def test_applier_inserts_approved_evidence_without_source_anchor() -> None:
+    """Approved registry evidence may add exact human-approved wording."""
 
-    with pytest.raises(
-        StructuredCVAssemblyError,
-        match="exactly one grounded source anchor",
-    ):
-        StructuredCVProposalApplier().apply(
-            base_cv=build_cv(),
-            proposals=[build_proposal()],
-            approved_evidence=[build_evidence(source_id="DOC-OTHER")],
-        )
+    result = StructuredCVProposalApplier().apply(
+        base_cv=build_cv(projects_text=f"{SOURCE_TEXT}\n"),
+        proposals=[build_proposal()],
+        approved_evidence=[build_evidence(source_id="DOC-OTHER")],
+    )
+
+    assert result.structured_cv.sections[0].free_text == (
+        f"{SOURCE_TEXT}\n- Built CareerOps using Python, FastAPI and PostgreSQL."
+    )
+
+    change = result.applied_changes[0]
+
+    assert change.application_mode is (
+        CVChangeApplicationMode.EVIDENCE_BACKED_INSERTION
+    )
+    assert change.source_anchor is None
+    assert change.original_text is None
+    assert change.anchor_evidence_ids == []
 
 
 def test_applier_reconciles_absent_section_from_unique_source_anchor() -> None:
@@ -300,6 +309,95 @@ def test_applier_rejects_ambiguous_anchor_when_section_is_absent() -> None:
             base_cv=cv,
             proposals=[build_proposal()],
             approved_evidence=[build_evidence()],
+        )
+
+
+def test_applier_creates_missing_section_for_approved_insertion() -> None:
+    """Missing target sections should be created deterministically."""
+
+    cv = build_cv().model_copy(
+        update={
+            "sections": [
+                StructuredCVSection(
+                    section=CVSection.EXPERIENCE,
+                    heading="Experience",
+                    free_text="Existing employment remains unchanged.",
+                )
+            ]
+        }
+    )
+
+    result = StructuredCVProposalApplier().apply(
+        base_cv=cv,
+        proposals=[build_proposal()],
+        approved_evidence=[build_evidence(source_id="DOC-OTHER")],
+    )
+
+    assert [section.section for section in result.structured_cv.sections] == [
+        CVSection.EXPERIENCE,
+        CVSection.PROJECTS,
+    ]
+
+    projects = result.structured_cv.sections[1]
+
+    assert projects.heading == "Projects"
+    assert projects.free_text == (
+        "- Built CareerOps using Python, FastAPI and PostgreSQL."
+    )
+
+
+def test_applier_preserves_proposal_order_for_multiple_insertions() -> None:
+    """Registry-backed insertions must remain in approved proposal order."""
+
+    result = StructuredCVProposalApplier().apply(
+        base_cv=build_cv(projects_text="Existing project."),
+        proposals=[
+            build_proposal(
+                proposal_id="CVP-001",
+                proposed_text="Built a tested FastAPI service.",
+                evidence_id="EVD-001",
+            ),
+            build_proposal(
+                proposal_id="CVP-002",
+                proposed_text="Deployed the service using Docker.",
+                evidence_id="EVD-002",
+            ),
+        ],
+        approved_evidence=[
+            build_evidence(
+                evidence_id="EVD-001",
+                source_id="DOC-OTHER",
+            ),
+            build_evidence(
+                evidence_id="EVD-002",
+                source_excerpt="Deployed the service using Docker.",
+                source_id="DOC-OTHER",
+            ),
+        ],
+    )
+
+    assert result.structured_cv.sections[0].free_text == (
+        "Existing project.\n"
+        "- Built a tested FastAPI service.\n"
+        "- Deployed the service using Docker."
+    )
+    assert [change.proposal_id for change in result.applied_changes] == [
+        "CVP-001",
+        "CVP-002",
+    ]
+
+
+def test_applier_rejects_missing_explicit_anchor() -> None:
+    """Explicit edits must not fall back to insertion when their anchor is absent."""
+
+    with pytest.raises(
+        StructuredCVAssemblyError,
+        match="match exactly once",
+    ):
+        StructuredCVProposalApplier().apply(
+            base_cv=build_cv(projects_text="Unrelated source text."),
+            proposals=[build_proposal(current_text="Missing source text.")],
+            approved_evidence=[build_evidence(source_id="DOC-OTHER")],
         )
 
 

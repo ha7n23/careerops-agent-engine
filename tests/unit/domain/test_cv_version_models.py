@@ -152,6 +152,47 @@ def build_artifact(
     )
 
 
+def test_evidence_backed_insertion_has_explicit_non_replacement_audit() -> None:
+    """Insertion provenance must not pretend that source text was replaced."""
+
+    change = AppliedCVChange(
+        change_id="CHG-INSERT",
+        proposal_id="CVP-001",
+        section=CVSection.PROJECTS,
+        application_mode=(CVChangeApplicationMode.EVIDENCE_BACKED_INSERTION),
+        source_anchor=None,
+        original_text=None,
+        applied_text="Built a tested FastAPI service.",
+        anchor_evidence_ids=[],
+        requirement_ids=["REQ-001"],
+        supporting_evidence_ids=["EVD-001"],
+    )
+
+    assert change.source_anchor is None
+    assert change.original_text is None
+
+
+def test_evidence_backed_insertion_rejects_false_source_anchor() -> None:
+    """Insertion audit data cannot claim source text that was not replaced."""
+
+    with pytest.raises(
+        ValidationError,
+        match="cannot claim replaced source text",
+    ):
+        AppliedCVChange(
+            change_id="CHG-INSERT",
+            proposal_id="CVP-001",
+            section=CVSection.PROJECTS,
+            application_mode=(CVChangeApplicationMode.EVIDENCE_BACKED_INSERTION),
+            source_anchor="Invented anchor",
+            original_text=None,
+            applied_text="Built a tested FastAPI service.",
+            anchor_evidence_ids=[],
+            requirement_ids=["REQ-001"],
+            supporting_evidence_ids=["EVD-001"],
+        )
+
+
 def test_assembled_cv_version_accepts_grounded_provenance() -> None:
     """Structured content may exist before any rendering occurs."""
 

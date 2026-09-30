@@ -9,6 +9,7 @@ from careerops_agent_engine.application.exceptions import (
 )
 from careerops_agent_engine.domain.enums import (
     CVChangeApplicationMode,
+    CVSection,
     EvidenceSourceType,
     VerificationStatus,
 )
@@ -24,6 +25,7 @@ from careerops_agent_engine.domain.models.evidence import (
 )
 from careerops_agent_engine.domain.models.structured_cv import (
     StructuredCV,
+    StructuredCVSection,
 )
 
 
@@ -43,12 +45,12 @@ class ResolvedProposalChange:
     """One proposal resolved before any source mutation occurs."""
 
     proposal: CVChangeProposal
-    section_index: int
-    anchor: ResolvedAnchor
+    section_index: int | None
+    anchor: ResolvedAnchor | None
 
 
 class StructuredCVProposalApplier:
-    """Apply approved proposals only to uniquely grounded source spans."""
+    """Apply approved proposals through replacement or audited insertion."""
 
     def apply(
         self,
@@ -57,7 +59,7 @@ class StructuredCVProposalApplier:
         proposals: list[CVChangeProposal],
         approved_evidence: list[CareerEvidence],
     ) -> StructuredCVTailoringResult:
-        """Apply every proposal without rewriting untouched CV content."""
+        """Apply every proposal without rewriting unrelated CV content."""
 
         if not proposals:
             raise StructuredCVAssemblyError(
@@ -82,7 +84,11 @@ class StructuredCVProposalApplier:
             for proposal in proposals
         ]
 
-        self._validate_non_overlapping_changes(resolved_changes)
+        anchored_changes = [
+            change for change in resolved_changes if change.anchor is not None
+        ]
+
+        self._validate_non_overlapping_changes(anchored_changes)
 
         updated_sections = list(base_cv.sections)
 
@@ -94,6 +100,9 @@ class StructuredCVProposalApplier:
         ] = {}
 
         for change in resolved_changes:
+            if change.anchor is None or change.section_index is None:
+                continue
+
             changes_by_section.setdefault(
                 change.section_index,
                 [],
@@ -112,13 +121,20 @@ class StructuredCVProposalApplier:
 
             for change in sorted(
                 section_changes,
-                key=lambda item: item.anchor.start,
+                key=resolved_anchor_start,
                 reverse=True,
             ):
+                anchor = change.anchor
+
+                if anchor is None:
+                    raise StructuredCVAssemblyError(
+                        "An anchored CV change requires a resolved source span."
+                    )
+
                 updated_text = (
-                    updated_text[: change.anchor.start]
+                    updated_text[: anchor.start]
                     + change.proposal.proposed_text
-                    + updated_text[change.anchor.end :]
+                    + updated_text[anchor.end :]
                 )
 
                 applied_changes.append(
@@ -129,10 +145,10 @@ class StructuredCVProposalApplier:
                         proposal_id=(change.proposal.proposal_id),
                         section=(change.proposal.section),
                         application_mode=(CVChangeApplicationMode.ANCHORED_REPLACEMENT),
-                        source_anchor=(change.anchor.source_anchor),
-                        original_text=(change.anchor.original_text),
+                        source_anchor=(anchor.source_anchor),
+                        original_text=(anchor.original_text),
                         applied_text=(change.proposal.proposed_text),
-                        anchor_evidence_ids=list(change.anchor.anchor_evidence_ids),
+                        anchor_evidence_ids=list(anchor.anchor_evidence_ids),
                         requirement_ids=list(change.proposal.requirement_ids),
                         supporting_evidence_ids=list(
                             change.proposal.supporting_evidence_ids
@@ -144,6 +160,36 @@ class StructuredCVProposalApplier:
                 update={
                     "free_text": updated_text,
                 }
+            )
+
+        for change in resolved_changes:
+            if change.anchor is not None:
+                continue
+
+            updated_sections = self._insert_evidence_backed_proposal(
+                sections=updated_sections,
+                proposal=change.proposal,
+            )
+
+            applied_changes.append(
+                AppliedCVChange(
+                    change_id=build_applied_change_id(
+                        proposal_id=change.proposal.proposal_id
+                    ),
+                    proposal_id=change.proposal.proposal_id,
+                    section=change.proposal.section,
+                    application_mode=(
+                        CVChangeApplicationMode.EVIDENCE_BACKED_INSERTION
+                    ),
+                    source_anchor=None,
+                    original_text=None,
+                    applied_text=change.proposal.proposed_text,
+                    anchor_evidence_ids=[],
+                    requirement_ids=list(change.proposal.requirement_ids),
+                    supporting_evidence_ids=list(
+                        change.proposal.supporting_evidence_ids
+                    ),
+                )
             )
 
         applied_by_proposal = {change.proposal_id: change for change in applied_changes}
@@ -196,7 +242,7 @@ class StructuredCVProposalApplier:
         proposal: CVChangeProposal,
         evidence_by_id: dict[str, CareerEvidence],
     ) -> ResolvedProposalChange:
-        """Resolve one proposal to one unique source span."""
+        """Resolve one proposal to replacement or insertion."""
 
         supporting_evidence = []
 
@@ -240,13 +286,13 @@ class StructuredCVProposalApplier:
 
         section_index, section = matching_sections[0]
 
-        if section.free_text is None:
+        if section.free_text is None and proposal.current_text is not None:
             raise StructuredCVAssemblyError(
                 "Anchored proposal application currently "
                 "requires source section free text."
             )
 
-        if proposal.current_text is not None:
+        if proposal.current_text is not None and section.free_text is not None:
             anchor = self._resolve_unique_anchor(
                 source_text=section.free_text,
                 anchor_text=proposal.current_text,
@@ -264,29 +310,42 @@ class StructuredCVProposalApplier:
             set[str],
         ] = {}
 
-        for evidence in supporting_evidence:
-            for reference in evidence.source_references:
-                if (
-                    reference.source_type is not EvidenceSourceType.UPLOADED_CV
-                    or reference.source_id != base_cv.source_document_id
-                    or reference.source_excerpt is None
-                ):
-                    continue
+        if section.free_text is not None:
+            for evidence in supporting_evidence:
+                for reference in evidence.source_references:
+                    if (
+                        reference.source_type is not EvidenceSourceType.UPLOADED_CV
+                        or reference.source_id != base_cv.source_document_id
+                        or reference.source_excerpt is None
+                    ):
+                        continue
 
-                if self._has_anchor(
-                    source_text=section.free_text,
-                    anchor_text=(reference.source_excerpt),
-                ):
-                    candidate_anchors.setdefault(
-                        reference.source_excerpt,
-                        set(),
-                    ).add(evidence.evidence_id)
+                    if self._has_anchor(
+                        source_text=section.free_text,
+                        anchor_text=(reference.source_excerpt),
+                    ):
+                        candidate_anchors.setdefault(
+                            reference.source_excerpt,
+                            set(),
+                        ).add(evidence.evidence_id)
 
-        if len(candidate_anchors) != 1:
+        if len(candidate_anchors) > 1:
             raise StructuredCVAssemblyError(
                 "A CV proposal without current text requires "
                 "exactly one grounded source anchor in its "
                 "target section."
+            )
+
+        if not candidate_anchors:
+            return ResolvedProposalChange(
+                proposal=proposal,
+                section_index=section_index,
+                anchor=None,
+            )
+
+        if section.free_text is None:
+            raise StructuredCVAssemblyError(
+                "A grounded source anchor requires source section free text."
             )
 
         anchor_text, evidence_ids = next(iter(candidate_anchors.items()))
@@ -310,7 +369,7 @@ class StructuredCVProposalApplier:
         proposal: CVChangeProposal,
         supporting_evidence: list[CareerEvidence],
     ) -> ResolvedProposalChange:
-        """Reconcile a stale section label using one unique source anchor."""
+        """Reconcile one source anchor or select missing-section insertion."""
 
         candidate_anchors: dict[str, set[str]] = {}
 
@@ -357,10 +416,23 @@ class StructuredCVProposalApplier:
                         )
                     )
 
-        if len(resolved_candidates) != 1:
+        if len(resolved_candidates) > 1:
             raise StructuredCVAssemblyError(
                 "A CV proposal whose declared section is absent requires "
                 "exactly one grounded source anchor across the selected CV."
+            )
+
+        if not resolved_candidates:
+            if proposal.current_text is not None:
+                raise StructuredCVAssemblyError(
+                    "An explicit CV source anchor must match exactly once "
+                    "across the selected CV."
+                )
+
+            return ResolvedProposalChange(
+                proposal=proposal,
+                section_index=None,
+                anchor=None,
             )
 
         section_index, reconciled_proposal, anchor = resolved_candidates[0]
@@ -370,6 +442,43 @@ class StructuredCVProposalApplier:
             section_index=section_index,
             anchor=anchor,
         )
+
+    @staticmethod
+    def _insert_evidence_backed_proposal(
+        *,
+        sections: list[StructuredCVSection],
+        proposal: CVChangeProposal,
+    ) -> list[StructuredCVSection]:
+        """Insert exact approved wording without claiming a source replacement."""
+
+        updated_sections = list(sections)
+        inserted_line = f"- {proposal.proposed_text}"
+
+        for index, section in enumerate(updated_sections):
+            if section.section is not proposal.section:
+                continue
+
+            if section.free_text is None:
+                updated_text = inserted_line
+            else:
+                separator = "" if section.free_text.endswith("\n") else "\n"
+                updated_text = f"{section.free_text}{separator}{inserted_line}"
+
+            updated_sections[index] = section.model_copy(
+                update={"free_text": updated_text}
+            )
+
+            return updated_sections
+
+        updated_sections.append(
+            StructuredCVSection(
+                section=proposal.section,
+                heading=build_section_heading(proposal.section),
+                free_text=inserted_line,
+            )
+        )
+
+        return updated_sections
 
     @staticmethod
     def _has_anchor(
@@ -420,6 +529,9 @@ class StructuredCVProposalApplier:
         ] = {}
 
         for change in changes:
+            if change.section_index is None or change.anchor is None:
+                continue
+
             by_section.setdefault(
                 change.section_index,
                 [],
@@ -428,10 +540,7 @@ class StructuredCVProposalApplier:
         for section_changes in by_section.values():
             ordered = sorted(
                 section_changes,
-                key=lambda item: (
-                    item.anchor.start,
-                    item.anchor.end,
-                ),
+                key=resolved_anchor_bounds,
             )
 
             for previous, current in zip(
@@ -439,10 +548,53 @@ class StructuredCVProposalApplier:
                 ordered[1:],
                 strict=False,
             ):
-                if current.anchor.start < previous.anchor.end:
+                previous_anchor = previous.anchor
+                current_anchor = current.anchor
+
+                if previous_anchor is None or current_anchor is None:
+                    continue
+
+                if current_anchor.start < previous_anchor.end:
                     raise StructuredCVAssemblyError(
                         "CV proposals cannot modify overlapping source spans."
                     )
+
+
+def resolved_anchor_start(
+    change: ResolvedProposalChange,
+) -> int:
+    """Return a resolved anchor start for deterministic sorting."""
+
+    if change.anchor is None:
+        raise StructuredCVAssemblyError(
+            "An anchored CV change requires a resolved source span."
+        )
+
+    return change.anchor.start
+
+
+def resolved_anchor_bounds(
+    change: ResolvedProposalChange,
+) -> tuple[int, int]:
+    """Return resolved anchor bounds for overlap validation."""
+
+    if change.anchor is None:
+        raise StructuredCVAssemblyError(
+            "An anchored CV change requires a resolved source span."
+        )
+
+    return (
+        change.anchor.start,
+        change.anchor.end,
+    )
+
+
+def build_section_heading(
+    section: CVSection,
+) -> str:
+    """Build a stable human-readable heading for a missing CV section."""
+
+    return section.value.replace("_", " ").title()
 
 
 def build_whitespace_pattern(
