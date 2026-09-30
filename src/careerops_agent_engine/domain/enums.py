@@ -171,3 +171,4 @@ class CVChangeApplicationMode(StrEnum):
     """How an approved CV proposal was applied to source content."""
 
     ANCHORED_REPLACEMENT = "anchored_replacement"
+    EVIDENCE_BACKED_INSERTION = "evidence_backed_insertion"

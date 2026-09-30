@@ -270,6 +270,13 @@ and PDF artifact metadata, and `reused_existing_version`. Retrying the same
 accepted workflow/document pair recovers the existing version rather than
 silently creating a duplicate.
 
+Approved proposals use `anchored_replacement` when one source span can be
+resolved. When no source anchor exists, exact human-approved wording backed by
+approved Evidence Registry records uses `evidence_backed_insertion`: it is
+appended to the declared section, or a standard missing section is created.
+Ambiguous anchors remain blocked, and insertion never claims replaced source
+text in its audit record.
+
 Retrieve metadata with `GET /api/v1/cv-versions/{cv_version_id}`. Download only
 verified artifacts with `artifact_format=docx` or `artifact_format=pdf`.
 Downloads return attachment bytes and never expose private storage keys.
@@ -304,4 +311,3 @@ proofs:
 - PostgreSQL/Alembic initialization and non-root container health;
 - real Groq job-analysis execution through the safety boundary;
 - real HTTP DOCX/PDF generation, verification, download, retry, and isolation.
-

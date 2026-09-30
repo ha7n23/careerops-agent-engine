@@ -33,12 +33,14 @@ class AppliedCVChange(DomainModel):
 
     application_mode: CVChangeApplicationMode
 
-    source_anchor: str = Field(
+    source_anchor: str | None = Field(
+        default=None,
         min_length=1,
         max_length=1_500,
     )
 
-    original_text: str = Field(
+    original_text: str | None = Field(
+        default=None,
         min_length=1,
         max_length=1_500,
     )
@@ -66,8 +68,25 @@ class AppliedCVChange(DomainModel):
     ) -> Self:
         """Enforce unambiguous and evidence-grounded change provenance."""
 
-        if self.original_text == self.applied_text:
-            raise ValueError("An applied CV change must alter the source text.")
+        if self.application_mode is CVChangeApplicationMode.ANCHORED_REPLACEMENT:
+            if self.source_anchor is None or self.original_text is None:
+                raise ValueError(
+                    "An anchored replacement requires source anchor and original text."
+                )
+
+            if self.original_text == self.applied_text:
+                raise ValueError("An applied CV change must alter the source text.")
+
+        if self.application_mode is CVChangeApplicationMode.EVIDENCE_BACKED_INSERTION:
+            if self.source_anchor is not None or self.original_text is not None:
+                raise ValueError(
+                    "An evidence-backed insertion cannot claim replaced source text."
+                )
+
+            if self.anchor_evidence_ids:
+                raise ValueError(
+                    "An evidence-backed insertion cannot claim anchor evidence."
+                )
 
         identifier_groups = (
             (

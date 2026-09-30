@@ -20,6 +20,7 @@ from careerops_agent_engine.domain.enums import (
     ApprovalStatus,
     CareerDocumentFormat,
     CareerDocumentStatus,
+    CVChangeApplicationMode,
     CVSection,
     EvidenceCategory,
     EvidenceSourceType,
@@ -67,7 +68,11 @@ def build_document(
     )
 
 
-def build_evidence() -> CareerEvidence:
+def build_evidence(
+    *,
+    source_type: EvidenceSourceType = EvidenceSourceType.UPLOADED_CV,
+    source_id: str = "DOC-001",
+) -> CareerEvidence:
     """Create source-grounded approved career evidence."""
 
     return CareerEvidence(
@@ -85,8 +90,8 @@ def build_evidence() -> CareerEvidence:
         approved_claims=[("Built CareerOps using Python and FastAPI.")],
         source_references=[
             SourceReference(
-                source_type=(EvidenceSourceType.UPLOADED_CV),
-                source_id="DOC-001",
+                source_type=source_type,
+                source_id=source_id,
                 source_excerpt=("Built CareerOps using Python and FastAPI."),
             )
         ],
@@ -269,6 +274,7 @@ def build_service(
     run: JobAnalysisRunSnapshot | None = None,
     document: CareerDocument | None = None,
     include_evidence: bool = True,
+    evidence: CareerEvidence | None = None,
 ) -> tuple[
     FinalCVAssemblyService,
     FakeDocumentPreparer,
@@ -278,7 +284,13 @@ def build_service(
     preparer = FakeDocumentPreparer()
 
     evidence_repository = InMemoryEvidenceRepository(
-        {"USER-001": ([build_evidence()] if include_evidence else [])}
+        {
+            "USER-001": (
+                [evidence if evidence is not None else build_evidence()]
+                if include_evidence
+                else []
+            )
+        }
     )
 
     service = FinalCVAssemblyService(
@@ -343,6 +355,32 @@ def test_edited_review_outcome_is_also_accepted() -> None:
     )
 
     assert result.job_run.review_status is (ApprovalStatus.EDITED)
+
+
+def test_final_assembly_inserts_approved_registry_evidence() -> None:
+    """Approved non-CV evidence should become exact audited CV wording."""
+
+    service, _ = build_service(
+        evidence=build_evidence(
+            source_type=EvidenceSourceType.MANUAL_ENTRY,
+            source_id="TXT-001",
+        )
+    )
+
+    result = service.assemble(
+        user_id="USER-001",
+        thread_id="THR-001",
+        source_document_id="DOC-001",
+    )
+
+    projects = result.tailoring_result.structured_cv.sections[0]
+
+    assert projects.free_text == (
+        f"{SOURCE_TEXT}\n- Built a CareerOps application using Python and FastAPI."
+    )
+    assert result.tailoring_result.applied_changes[0].application_mode is (
+        CVChangeApplicationMode.EVIDENCE_BACKED_INSERTION
+    )
 
 
 def test_awaiting_review_run_cannot_be_rendered() -> None:
